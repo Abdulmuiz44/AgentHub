@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 from typing import Any
 
 from sqlmodel import Session as DBSession, select
@@ -29,6 +29,10 @@ def upsert_skill_definition(
     tags: list[str],
     manifest_json: dict[str, Any],
     install_source: str | None,
+    config_values_json: dict[str, Any] | None = None,
+    secret_bindings_json: dict[str, str] | None = None,
+    readiness_status: str = "ready",
+    readiness_summary: str = "Ready",
 ) -> SkillDefinition:
     skill = get_skill_definition(db, name)
     now = datetime.utcnow()
@@ -43,9 +47,14 @@ def upsert_skill_definition(
             scopes=scopes,
             tags=tags,
             manifest_json=manifest_json,
+            config_values_json=config_values_json or {},
+            secret_bindings_json=secret_bindings_json or {},
+            readiness_status=readiness_status,
+            readiness_summary=readiness_summary,
             install_source=install_source,
             created_at=now,
             updated_at=now,
+            config_updated_at=now if (config_values_json or secret_bindings_json) else None,
         )
     else:
         skill.version = version
@@ -57,6 +66,14 @@ def upsert_skill_definition(
         skill.tags = tags
         skill.manifest_json = manifest_json
         skill.install_source = install_source
+        if config_values_json is not None:
+            skill.config_values_json = config_values_json
+            skill.config_updated_at = now
+        if secret_bindings_json is not None:
+            skill.secret_bindings_json = secret_bindings_json
+            skill.config_updated_at = now
+        skill.readiness_status = readiness_status
+        skill.readiness_summary = readiness_summary
         skill.updated_at = now
     db.add(skill)
     db.commit()
@@ -65,9 +82,13 @@ def upsert_skill_definition(
 
 
 def update_skill_definition(db: DBSession, skill: SkillDefinition, **fields: Any) -> SkillDefinition:
+    config_keys = {"config_values_json", "secret_bindings_json"}
     for key, value in fields.items():
         setattr(skill, key, value)
-    skill.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    if config_keys.intersection(fields):
+        skill.config_updated_at = now
+    skill.updated_at = now
     db.add(skill)
     db.commit()
     db.refresh(skill)

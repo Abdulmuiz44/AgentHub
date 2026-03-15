@@ -1,4 +1,4 @@
-﻿export type CreateRunPayload = {
+export type CreateRunPayload = {
   task: string;
   provider: string;
   model: string;
@@ -69,6 +69,32 @@ export type ProviderHealthResponse = {
   message: string;
 };
 
+export type SkillConfigField = {
+  key: string;
+  label?: string | null;
+  description?: string | null;
+  required: boolean;
+  secret: boolean;
+  value_type: string;
+  default?: unknown;
+  env_var_allowed: boolean;
+  example?: string | null;
+};
+
+export type SkillConfigValue = {
+  key: string;
+  value?: unknown;
+  configured: boolean;
+  secret_binding?: string | null;
+  uses_environment_binding: boolean;
+};
+
+export type SkillConfigState = {
+  readiness_status: string;
+  readiness_summary: string;
+  values: SkillConfigValue[];
+};
+
 export type SkillResponse = {
   id?: number | null;
   name: string;
@@ -83,12 +109,28 @@ export type SkillResponse = {
   last_test_status?: string | null;
   last_test_summary?: string | null;
   last_tested_at?: string | null;
+  readiness_status: string;
+  readiness_summary: string;
+  config_schema: SkillConfigField[];
+  config_state: SkillConfigState;
   manifest: Record<string, unknown>;
+};
+
+export type SkillConfigResponse = {
+  skill_name: string;
+  config_schema: SkillConfigField[];
+  state: SkillConfigState;
+  updated_at?: string | null;
 };
 
 export type SkillInstallPayload = {
   manifest?: Record<string, unknown>;
   manifest_path?: string;
+};
+
+export type SkillConfigUpdatePayload = {
+  values?: Record<string, unknown>;
+  secret_bindings?: Record<string, string>;
 };
 
 export type SkillTestResponse = {
@@ -175,6 +217,14 @@ export async function listSkills(): Promise<SkillResponse[]> {
   return response.json();
 }
 
+export async function getSkillConfig(name: string): Promise<SkillConfigResponse> {
+  const response = await fetch(`${API_BASE}/skills/${encodeURIComponent(name)}/config`, { cache: "no-store" });
+  if (!response.ok) {
+    await readError(response, "Skill config request failed");
+  }
+  return response.json();
+}
+
 export async function installSkill(payload: SkillInstallPayload): Promise<SkillResponse> {
   const response = await fetch(`${API_BASE}/skills/install`, {
     method: "POST",
@@ -183,6 +233,18 @@ export async function installSkill(payload: SkillInstallPayload): Promise<SkillR
   });
   if (!response.ok) {
     await readError(response, "Skill install request failed");
+  }
+  return response.json();
+}
+
+export async function updateSkillConfig(name: string, payload: SkillConfigUpdatePayload): Promise<SkillResponse> {
+  const response = await fetch(`${API_BASE}/skills/${encodeURIComponent(name)}/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    await readError(response, "Skill config update request failed");
   }
   return response.json();
 }
