@@ -1,0 +1,20 @@
+[project]
+name = "agenthub-monorepo"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+  "apps/api",
+  "packages/core",
+  "packages/models",
+  "packages/skills",
+  "packages/memory",
+  "packages/safety",
+  "packages/registry",
+  "packages/sdk",
+]
