@@ -42,6 +42,8 @@ class RunResponse(BaseModel):
     synthesis_mode: str | None = None
     synthesis_status: str | None = None
     synthesis_error_summary: str | None = None
+    execution_summary: dict[str, Any] = Field(default_factory=dict)
+    evidence_summary: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
@@ -78,6 +80,7 @@ class ProviderModelsItemResponse(BaseModel):
     configuration_status: str
     is_configured: bool
     models: list[str] = Field(default_factory=list)
+    message: str | None = None
 
 
 class ProviderModelsResponse(BaseModel):

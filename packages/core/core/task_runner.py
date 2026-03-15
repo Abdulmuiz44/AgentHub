@@ -27,7 +27,7 @@ class TaskRunner:
         traces.record_simple(
             context.run_id,
             EventType.SYNTHESIS_STARTED,
-            {"provider": request.provider, "model": request.model},
+            {"provider": request.provider, "model": request.model, "evidence_items": len(result.evidence.items)},
         )
 
         synthesis_output, synthesis_meta = self.synthesis_engine.synthesize(
@@ -36,7 +36,8 @@ class TaskRunner:
             model=request.model,
             plan=result.plan,
             step_results=result.step_results,
-            execution_summary=result.output,
+            execution_summary=result.execution_summary,
+            evidence=result.evidence,
         )
 
         if synthesis_meta.mode == "deterministic_fallback" and synthesis_meta.error_summary:
@@ -61,6 +62,8 @@ class TaskRunner:
                 "provider_status": synthesis_meta.provider_status,
                 "model": synthesis_meta.model,
                 "usage": synthesis_meta.provider_usage_summary,
+                "execution_summary": result.execution_summary,
+                "evidence_summary": {"items": len(result.evidence.items), "notes": len(result.evidence.notes)},
             },
         )
 

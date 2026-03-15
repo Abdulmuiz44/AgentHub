@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .contracts import PlanStep, StepExecutionResult, SynthesisMetadata
+from .contracts import EvidenceBundle, PlanStep, StepExecutionResult, SynthesisMetadata
 from models.base import ProviderGenerationRequest, ProviderGenerationSettings, ProviderMessage, ProviderUsage
 from models.registry import ProviderRegistry
 
@@ -17,7 +17,8 @@ class SynthesisEngine:
         model: str,
         plan: list[PlanStep],
         step_results: list[StepExecutionResult],
-        execution_summary: str,
+        execution_summary: dict,
+        evidence: EvidenceBundle,
     ) -> tuple[str, SynthesisMetadata]:
         if not provider or not model or provider == "builtin" or model == "deterministic":
             return self._fallback_output(
@@ -27,6 +28,7 @@ class SynthesisEngine:
                 plan=plan,
                 step_results=step_results,
                 execution_summary=execution_summary,
+                evidence=evidence,
                 error_summary="Model provider configuration missing or deterministic mode selected",
                 status="skipped",
                 provider_status="not_requested",
@@ -41,12 +43,19 @@ class SynthesisEngine:
                 plan=plan,
                 step_results=step_results,
                 execution_summary=execution_summary,
+                evidence=evidence,
                 error_summary=f"Provider not found: {provider}",
                 status="failed",
                 provider_status="not_available",
             )
 
-        prompt = self._build_prompt(task=task, plan=plan, step_results=step_results, execution_summary=execution_summary)
+        prompt = self._build_prompt(
+            task=task,
+            plan=plan,
+            step_results=step_results,
+            execution_summary=execution_summary,
+            evidence=evidence,
+        )
         request_model = ProviderGenerationRequest(
             model=model,
             messages=[ProviderMessage(role="user", content=self._normalize_text(prompt))],
@@ -63,6 +72,7 @@ class SynthesisEngine:
                 plan=plan,
                 step_results=step_results,
                 execution_summary=execution_summary,
+                evidence=evidence,
                 error_summary=f"Unexpected provider exception: {exc}",
                 status="failed",
                 provider_status="exception",
@@ -80,6 +90,7 @@ class SynthesisEngine:
                 plan=plan,
                 step_results=step_results,
                 execution_summary=execution_summary,
+                evidence=evidence,
                 error_summary=error_summary,
                 status="failed",
                 provider_status="error",
@@ -95,6 +106,7 @@ class SynthesisEngine:
                 plan=plan,
                 step_results=step_results,
                 execution_summary=execution_summary,
+                evidence=evidence,
                 error_summary="invalid_response: Provider returned empty output",
                 status="failed",
                 provider_status="invalid_response",
@@ -117,12 +129,17 @@ class SynthesisEngine:
         task: str,
         plan: list[PlanStep],
         step_results: list[StepExecutionResult],
-        execution_summary: str,
+        execution_summary: dict,
+        evidence: EvidenceBundle,
     ) -> str:
         plan_lines = [f"- {step.id}: {step.title}" for step in plan]
         result_lines = [
             f"- {result.step_id} ({'success' if result.success else 'failure'}): {result.summary}"
             for result in step_results
+        ]
+        evidence_lines = [
+            f"- [{item.source_type}] {item.title or item.source_ref}: {item.excerpt[:220]}"
+            for item in evidence.items[:10]
         ]
         return "\n".join(
             [
@@ -132,8 +149,10 @@ class SynthesisEngine:
                 *plan_lines,
                 "Step Results:",
                 *result_lines,
+                "Evidence:",
+                *evidence_lines,
                 "Execution Summary:",
-                execution_summary,
+                str(execution_summary),
             ]
         )
 
@@ -145,13 +164,20 @@ class SynthesisEngine:
         model: str,
         plan: list[PlanStep],
         step_results: list[StepExecutionResult],
-        execution_summary: str,
+        execution_summary: dict,
+        evidence: EvidenceBundle,
         error_summary: str,
         status: str,
         provider_status: str,
         provider_usage_summary: str | None = None,
     ) -> tuple[str, SynthesisMetadata]:
-        output = self._local_synthesis(task=task, plan=plan, step_results=step_results, execution_summary=execution_summary)
+        output = self._local_synthesis(
+            task=task,
+            plan=plan,
+            step_results=step_results,
+            execution_summary=execution_summary,
+            evidence=evidence,
+        )
         metadata = SynthesisMetadata(
             mode="deterministic_fallback",
             status=status,
@@ -169,17 +195,46 @@ class SynthesisEngine:
         task: str,
         plan: list[PlanStep],
         step_results: list[StepExecutionResult],
-        execution_summary: str,
+        execution_summary: dict,
+        evidence: EvidenceBundle,
     ) -> str:
-        completed = sum(1 for item in step_results if item.success)
-        total = len(step_results)
+        sources = [item for item in evidence.items if item.source_type in {"web_page", "search_result", "filesystem"}]
+        comparisons = len({item.source_ref for item in sources}) > 1
         lines = [
             f"Task: {task}",
-            f"Completed steps: {completed}/{total}",
             f"Planned steps: {len(plan)}",
-            "Execution summary:",
-            execution_summary,
+            f"Completed steps: {sum(1 for item in step_results if item.success)}/{len(step_results)}",
+            "",
+            "Summary:",
         ]
+
+        if sources:
+            lines.append(
+                "Compared evidence across multiple sources." if comparisons else "Collected evidence from available source(s)."
+            )
+            for item in sources[:6]:
+                label = item.title or item.source_ref
+                lines.append(f"- {label}: {item.excerpt[:180]}")
+        else:
+            lines.append("No strong evidence collected. Output may be incomplete.")
+
+        if evidence.notes:
+            lines.append("")
+            lines.append("Gaps / errors:")
+            for note in evidence.notes[:5]:
+                lines.append(f"- {note}")
+
+        lines.append("")
+        lines.append("Source references:")
+        refs = []
+        for item in sources[:8]:
+            if item.source_ref not in refs:
+                refs.append(item.source_ref)
+        for idx, ref in enumerate(refs, start=1):
+            lines.append(f"[{idx}] {ref}")
+
+        lines.append("")
+        lines.append(f"Execution summary: {execution_summary}")
         return "\n".join(lines)
 
     @staticmethod
