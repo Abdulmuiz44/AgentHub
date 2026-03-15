@@ -54,7 +54,14 @@ class TaskRunner:
         traces.record_simple(
             context.run_id,
             EventType.SYNTHESIS_COMPLETED,
-            synthesis_meta.model_dump(mode="json"),
+            {
+                "mode": synthesis_meta.mode,
+                "status": synthesis_meta.status,
+                "provider": synthesis_meta.provider,
+                "provider_status": synthesis_meta.provider_status,
+                "model": synthesis_meta.model,
+                "usage": synthesis_meta.provider_usage_summary,
+            },
         )
 
         result.output = synthesis_output
