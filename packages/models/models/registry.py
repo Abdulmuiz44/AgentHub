@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from enum import StrEnum
 
 from .base import ProviderAdapter, ProviderCapability
 from .ollama import OllamaAdapter
-from .openai import OpenAIAdapter
+from .openai import OpenAIAdapter, _resolve_openai_api_key
 
 
 class ProviderConfigurationStatus(StrEnum):
@@ -43,8 +42,11 @@ class ProviderLookupResult:
 
 def _resolve_configuration_status(provider_name: str) -> ProviderConfigurationStatus:
     if provider_name == "openai":
-        api_key = os.getenv("AGENTHUB_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-        return ProviderConfigurationStatus.CONFIGURED if api_key else ProviderConfigurationStatus.UNCONFIGURED
+        return (
+            ProviderConfigurationStatus.CONFIGURED
+            if _resolve_openai_api_key()
+            else ProviderConfigurationStatus.UNCONFIGURED
+        )
     if provider_name == "ollama":
         return ProviderConfigurationStatus.CONFIGURED
     return ProviderConfigurationStatus.UNKNOWN
