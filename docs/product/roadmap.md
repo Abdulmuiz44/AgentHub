@@ -1,4 +1,4 @@
-# AgentHub Roadmap (v0.1)
+﻿# AgentHub Roadmap (v0.1)
 
 ## Goal
 Ship a minimal local-first platform foundation with one deterministic runtime, one skill system, one model gateway, one dashboard, and one trace system.
@@ -8,6 +8,7 @@ Ship a minimal local-first platform foundation with one deterministic runtime, o
 2. FastAPI backend with persistence-backed health/sessions/runs/catalog endpoints.
 3. Read-only filesystem skill slice with workspace safety controls.
 4. Next.js dashboard shell wired to `POST /runs` with clear run feedback.
-5. ✅ Synchronous alpha execution loop with deterministic planning, executable filesystem/fetch skills, trace-rich run completion, and dashboard run result panel.
-6. ✅ Deterministic research workflow with `web_search`, bounded search->fetch execution, evidence aggregation, and improved synthesis/trace visibility.
-7. Next: incremental quality improvements for summarization and provider prompts while keeping deterministic planning explicit and inspectable.
+5. Completed: synchronous alpha execution loop with deterministic planning, executable filesystem/fetch skills, trace-rich run completion, and dashboard run result panel.
+6. Completed: deterministic research workflow with `web_search`, bounded search->fetch execution, evidence aggregation, and improved synthesis/trace visibility.
+7. Completed: local installable skill catalog with runtime-typed manifests, SQLite-backed skill persistence, MCP stdio wrapping, enable/disable/test flows, and a skills management UI.
+8. Next: upgrade the run lifecycle to true asynchronous pause/resume orchestration so installed skills can participate in longer-lived approval-aware workflows.

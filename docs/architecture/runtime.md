@@ -1,42 +1,70 @@
-# Runtime Architecture (Synchronous Deterministic Research Slice)
+﻿# Runtime Architecture (Deterministic Local Skill Platform Slice)
 
 ## Components
-- **API (`apps/api`)**: creates runs, executes runtime synchronously, persists run + traces, exposes run/trace routes.
-- **Core (`packages/core`)**: deterministic planner, bounded multi-step executor, evidence aggregation, synthesis engine, runtime contracts.
-- **Memory (`packages/memory`)**: SQLModel entities and SQLite repositories for sessions/runs/traces.
-- **Skills (`packages/skills`)**: executable skill interfaces and built-in `filesystem`, `fetch`, and `web_search` skills.
-- **Web (`apps/web`)**: dashboard and run detail UI showing synthesis mode, evidence summaries, and ordered trace events.
+- **API (`apps/api`)**: creates runs, exposes run/trace routes, and exposes typed skill catalog/install/enable/disable/test routes.
+- **Core (`packages/core`)**: deterministic planner, bounded executor, evidence aggregation, synthesis engine, and runtime contracts.
+- **Skill catalog service (`apps/api/app/services/skills.py`)**: seeds built-ins, persists local skill definitions, loads manifests, tests skills, and builds runtime registries.
+- **Memory (`packages/memory`)**: SQLModel entities and SQLite repositories for sessions, runs, traces, approvals, providers, and skill definitions.
+- **Skills (`packages/skills`)**: shared manifest spec, native built-in skills, MCP stdio wrapper, and unified skill registry.
+- **Web (`apps/web`)**: dashboard, run detail UI, and a practical skills management page.
 
-## Runtime flow
-1. Client calls `POST /runs`.
-2. API creates/attaches session and persists run (`pending` -> `running`).
-3. `TaskRunner` records `run.started` and creates deterministic plan (`plan.created`).
-4. `Executor` runs plan in order and emits tool lifecycle events:
-   - `tool.requested`
-   - `tool.started`
-   - `tool.completed` or `tool.failed`
-5. Research plans run `web_search` first, then bounded `fetch` of selected result URLs.
-6. Executor aggregates compact evidence (search snippets, fetched page summaries, filesystem excerpts, notes/errors).
-7. `SynthesisEngine` uses aggregated evidence:
-   - provider synthesis when configured
-   - deterministic fallback synthesis otherwise
-8. Runtime emits terminal event (`run.completed` or `run.failed`) and API persists run summary fields and ordered traces.
+## Skill platform flow
+1. Built-in native skills are defined in code with typed manifests.
+2. On demand, the skill catalog service seeds built-ins into SQLite-backed `SkillDefinition` records.
+3. Local manifests can be installed through `POST /skills/install` or loaded from a manifest path.
+4. Skill definitions persist runtime type, enabled state, manifest/config, tags/scopes, install source, and last test result.
+5. The catalog service builds a runtime `SkillRegistry` from enabled skill definitions.
+6. Planner behavior stays deterministic:
+   - normal built-in heuristics for file/url/research tasks
+   - explicit routing for `Use skill <name> ...`
+7. Executor invokes both native and MCP stdio skills through the same request/result contract.
+8. Trace events include compact runtime metadata such as skill name, runtime type, built-in vs installed, and result summaries.
 
-## Planner behavior
-- URL in task => direct `fetch` step.
-- File/path/repo-reading intent => `filesystem` step.
-- Research/comparison/pricing/docs lookup verbs => `web_search` then `fetch` from search results.
-- Mixed file + research intent can produce `filesystem` + `web_search` + `fetch` sequence.
-- Otherwise returns non-executable explanatory step.
+## Runtime types
+Supported in this milestone:
+- `native_python`
+- `mcp_stdio`
 
-## Guardrails and bounds
-- **Filesystem**: workspace-root restriction, traversal prevention, max file size, UTF-8 text default.
-- **Fetch**: HTTP/HTTPS only, timeout, response size cap, local/private target rejection.
-- **Web search**: standard query validation, max result cap, timeout, URL normalization/deduplication, invalid/local target rejection.
-- **Evidence/traces**: compact summaries only, no giant page-body dumps.
+Reserved for future expansion:
+- `mcp_http`
+- `subprocess_tool`
+
+## Manifest shape
+The shared manifest spec includes:
+- `name`, `version`, `description`
+- `runtime_type`
+- `scopes`, `permissions`, `tags`
+- `enabled_by_default`
+- `input_schema_summary`, `output_schema_summary`
+- `capabilities`
+- `install_source`
+- `test_input`
+- `mcp_stdio` config for stdio-backed skills:
+  - `command`
+  - `args`
+  - `env_var_refs`
+  - `working_directory`
+  - `startup_timeout_seconds`
+  - `call_timeout_seconds`
+  - `tool_name`
+
+## MCP stdio wrapper behavior
+The local MCP stdio wrapper intentionally stays small:
+- launches a configured stdio process
+- sends `initialize`
+- discovers tools via `tools/list`
+- invokes a selected tool via `tools/call`
+- normalizes the response into the shared AgentHub `SkillResult`
+- shuts down cleanly with `shutdown` and `exit`
+
+Current limits:
+- stdio only
+- tool invocation only
+- no MCP resources/prompts workflow
+- one process per execution/test call
 
 ## Current limitations
-- No model-driven tool planning/routing yet.
-- No async worker queue/background runtime.
-- Search providers intentionally small and environment-driven.
-- No browser/shell execution or multi-agent orchestration.
+- The current repository runtime still executes runs synchronously in-request.
+- Skill installation is local-manifest only.
+- Native built-ins are still the only heuristically selected skills unless the task explicitly names an installed skill.
+- Trace payloads remain compact and do not store full raw MCP protocol exchanges.

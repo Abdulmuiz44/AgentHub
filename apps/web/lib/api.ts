@@ -1,4 +1,4 @@
-export type CreateRunPayload = {
+﻿export type CreateRunPayload = {
   task: string;
   provider: string;
   model: string;
@@ -69,6 +69,36 @@ export type ProviderHealthResponse = {
   message: string;
 };
 
+export type SkillResponse = {
+  id?: number | null;
+  name: string;
+  version: string;
+  description: string;
+  runtime_type: string;
+  enabled: boolean;
+  is_builtin: boolean;
+  scopes: string[];
+  tags: string[];
+  install_source?: string | null;
+  last_test_status?: string | null;
+  last_test_summary?: string | null;
+  last_tested_at?: string | null;
+  manifest: Record<string, unknown>;
+};
+
+export type SkillInstallPayload = {
+  manifest?: Record<string, unknown>;
+  manifest_path?: string;
+};
+
+export type SkillTestResponse = {
+  skill: SkillResponse;
+  status: string;
+  summary: string;
+  checked_at: string;
+  metadata: Record<string, unknown>;
+};
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
 async function readError(response: Response, fallback: string): Promise<never> {
@@ -82,11 +112,9 @@ export async function createRun(payload: CreateRunPayload): Promise<CreateRunRes
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-
   if (!response.ok) {
     await readError(response, "Run creation failed");
   }
-
   return response.json();
 }
 
@@ -99,13 +127,10 @@ export async function listProviders(): Promise<ProviderSummary[]> {
 }
 
 export async function listProviderModels(provider: string): Promise<ProviderModelsItem> {
-  const response = await fetch(`${API_BASE}/providers/models?provider=${encodeURIComponent(provider)}`, {
-    cache: "no-store",
-  });
+  const response = await fetch(`${API_BASE}/providers/models?provider=${encodeURIComponent(provider)}`, { cache: "no-store" });
   if (!response.ok) {
     await readError(response, "Provider models request failed");
   }
-
   const payload: ProviderModelsResponse = await response.json();
   const providerMatch = payload.providers.find((item) => item.provider_name === provider);
   if (!providerMatch) {
@@ -138,6 +163,42 @@ export async function fetchRunTrace(runId: number): Promise<TraceResponse[]> {
   const response = await fetch(`${API_BASE}/runs/${runId}/trace`, { cache: "no-store" });
   if (!response.ok) {
     await readError(response, "Run trace request failed");
+  }
+  return response.json();
+}
+
+export async function listSkills(): Promise<SkillResponse[]> {
+  const response = await fetch(`${API_BASE}/skills`, { cache: "no-store" });
+  if (!response.ok) {
+    await readError(response, "Skill list request failed");
+  }
+  return response.json();
+}
+
+export async function installSkill(payload: SkillInstallPayload): Promise<SkillResponse> {
+  const response = await fetch(`${API_BASE}/skills/install`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    await readError(response, "Skill install request failed");
+  }
+  return response.json();
+}
+
+export async function setSkillEnabled(name: string, enabled: boolean): Promise<SkillResponse> {
+  const response = await fetch(`${API_BASE}/skills/${encodeURIComponent(name)}/${enabled ? "enable" : "disable"}`, { method: "POST" });
+  if (!response.ok) {
+    await readError(response, "Skill enable/disable request failed");
+  }
+  return response.json();
+}
+
+export async function testSkill(name: string): Promise<SkillTestResponse> {
+  const response = await fetch(`${API_BASE}/skills/${encodeURIComponent(name)}/test`, { method: "POST" });
+  if (!response.ok) {
+    await readError(response, "Skill test request failed");
   }
   return response.json();
 }

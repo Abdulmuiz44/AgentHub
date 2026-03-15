@@ -1,4 +1,4 @@
-import re
+﻿import re
 
 from .contracts import AgentRequest, PlanStep
 
@@ -9,13 +9,42 @@ _FILE_HINT_RE = re.compile(
 )
 _RESEARCH_HINT_RE = re.compile(r"\b(research|find|compare|look\s*up|pricing|documentation|docs)\b", re.IGNORECASE)
 _COMPARE_HINT_RE = re.compile(r"\b(compare|versus|vs\.?|difference)\b", re.IGNORECASE)
+_EXPLICIT_SKILL_RE = re.compile(r"\buse\s+skill\s+([a-zA-Z0-9_\-]+)\b", re.IGNORECASE)
 
 
 class Planner:
-    """Deterministic planner for alpha research execution."""
+    """Deterministic planner for alpha research execution and explicit skill routing."""
 
     def create_plan(self, request: AgentRequest) -> list[PlanStep]:
         task = request.task.strip()
+        explicit_skill = self._extract_explicit_skill(task)
+        if explicit_skill:
+            if request.available_skills and explicit_skill not in request.available_skills:
+                return [
+                    PlanStep(
+                        id="step-1",
+                        title=f"Requested skill {explicit_skill} is not installed or enabled",
+                        selection_reason="explicit_skill_missing",
+                    )
+                ]
+            if not self._allows_skill(request, explicit_skill):
+                return [
+                    PlanStep(
+                        id="step-1",
+                        title=f"Requested skill {explicit_skill} is disabled for this run",
+                        selection_reason="explicit_skill_disabled",
+                    )
+                ]
+            return [
+                PlanStep(
+                    id="step-1",
+                    title=f"Use explicitly requested skill {explicit_skill}",
+                    skill_name=explicit_skill,
+                    skill_input={"operation": "execute", "task": task, "prompt": task},
+                    selection_reason="explicit_skill_request",
+                )
+            ]
+
         urls = _URL_RE.findall(task)
         file_path = self._extract_path(task)
         steps: list[PlanStep] = []
@@ -28,6 +57,7 @@ class Planner:
                     title=f"Use filesystem.{operation} for {file_path}",
                     skill_name="filesystem",
                     skill_input={"operation": operation, "path": file_path},
+                    selection_reason="path_heuristic",
                 )
             )
 
@@ -38,6 +68,7 @@ class Planner:
                     title=f"Fetch content from {urls[0]}",
                     skill_name="fetch",
                     skill_input={"url": urls[0], "source": "direct_url"},
+                    selection_reason="url_heuristic",
                 )
             )
             return steps
@@ -50,11 +81,8 @@ class Planner:
                     id=self._step_id(steps),
                     title=f"Search web for: {task[:80]}",
                     skill_name="web_search",
-                    skill_input={
-                        "query": self._search_query(task),
-                        "max_results": max_results,
-                        "timeout_seconds": 8.0,
-                    },
+                    skill_input={"query": self._search_query(task), "max_results": max_results, "timeout_seconds": 8.0},
+                    selection_reason="research_heuristic",
                 )
             )
             steps.append(
@@ -63,6 +91,7 @@ class Planner:
                     title="Fetch top search results",
                     skill_name="fetch",
                     skill_input={"from_search": True, "max_urls": fetch_limit},
+                    selection_reason="research_followup",
                 )
             )
             return steps
@@ -77,7 +106,7 @@ class Planner:
         if file_path or _FILE_HINT_RE.search(task):
             return [PlanStep(id="step-1", title="Cannot access filesystem because filesystem skill is disabled")]
 
-        return [PlanStep(id="step-1", title="No executable tools inferred from task; provide a file path or URL.")]
+        return [PlanStep(id="step-1", title="No executable tools inferred from task; provide a file path, URL, or explicit skill.")]
 
     @staticmethod
     def _step_id(steps: list[PlanStep]) -> str:
@@ -87,6 +116,11 @@ class Planner:
     def _search_query(task: str) -> str:
         cleaned = re.sub(r"\s+", " ", task).strip()
         return cleaned[:280]
+
+    @staticmethod
+    def _extract_explicit_skill(task: str) -> str | None:
+        match = _EXPLICIT_SKILL_RE.search(task)
+        return match.group(1).strip() if match else None
 
     @staticmethod
     def _is_research_task(task: str) -> bool:

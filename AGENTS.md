@@ -1,4 +1,4 @@
-# AgentHub Contributor Guide
+﻿# AgentHub Contributor Guide
 
 ## Repo layout
 - `apps/api`: FastAPI service
@@ -22,17 +22,20 @@
 - Avoid speculative abstractions and advanced product surface.
 
 ## Runtime slice (current alpha)
-- `POST /runs` executes synchronously by default (`execute_now=true`).
-- Planner is deterministic and now supports URL/filepath heuristics plus research/comparison verbs.
-- Runtime invokes built-in skills (`filesystem`, `fetch`, `web_search`) and persists ordered trace events.
-- Research runs can execute bounded `web_search -> fetch` workflows and aggregate evidence.
-- Runs persist status transitions (`pending`, `running`, `completed`, `failed`) and `final_output`.
-- Run records include synthesis and compact execution/evidence summaries.
+- Runs persist through SQLite-backed sessions, runs, traces, approvals, providers, and skill definitions.
+- Planner routing remains deterministic and now supports explicit `Use skill <name>` routing for installed local skills.
+- Runtime executes native Python skills and MCP stdio-backed skills through one shared execution contract.
+- Skills are represented through a real local catalog with runtime type, manifest metadata, install source, and last test status.
+- MCP support is bounded to local stdio tool wrapping (`initialize`, `tools/list`, `tools/call`, clean shutdown).
+- Skills can be installed from a local manifest, enabled or disabled, and tested through API and UI.
 
 ## Search configuration
 - Optional `AGENTHUB_SEARCH_PROVIDER` (`searxng`, `duckduckgo`, `duckduckgo_instant`).
 - Optional `AGENTHUB_SEARXNG_BASE_URL` for SearxNG deployment.
 - Default behavior uses SearxNG when configured, otherwise DuckDuckGo Instant API fallback.
+
+## Repo hygiene
+- Temporary validation folders such as `.deps/`, `apps/api/.vendor/`, and `*.egg-info/` are ignored and should not be committed.
 
 ## Definition of done (small tasks)
 - API starts and health route responds.

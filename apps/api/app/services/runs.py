@@ -1,9 +1,9 @@
-import json
+﻿import json
 
 from sqlmodel import Session as DBSession
 
-from app.config import settings
 from app.services.sessions import create_session, get_session_by_id
+from app.services.skills import SkillCatalogService
 from core.contracts import AgentRequest, RunContext, RunStatus, TraceEvent
 from core.executor import Executor
 from core.planner import Planner
@@ -11,7 +11,6 @@ from core.task_runner import TaskRunner
 from memory import runs as run_repo
 from memory import traces as trace_repo
 from memory.models import Run, Session, TraceEventRecord
-from skills.registry import SkillRegistry
 
 
 def _persist_trace_events(db: DBSession, run_id: int, events: list[TraceEvent]) -> list[TraceEventRecord]:
@@ -22,23 +21,16 @@ def _persist_trace_events(db: DBSession, run_id: int, events: list[TraceEvent]) 
     return records
 
 
-def create_run(
-    db: DBSession,
-    request: AgentRequest,
-    *,
-    execute_now: bool = True,
-) -> tuple[Run, Session, list[TraceEventRecord]]:
+def create_run(db: DBSession, request: AgentRequest, *, execute_now: bool = True) -> tuple[Run, Session, list[TraceEventRecord]]:
     session = get_session_by_id(db, request.session_id) if request.session_id else None
     if session is None:
         session = create_session(db)
 
-    run = run_repo.create_run(
-        db,
-        task=request.task,
-        provider=request.provider,
-        model=request.model,
-        session_id=session.id,
-    )
+    catalog = SkillCatalogService(db)
+    request.available_skills = catalog.list_enabled_skill_names()
+    registry = catalog.build_registry()
+
+    run = run_repo.create_run(db, task=request.task, provider=request.provider, model=request.model, session_id=session.id)
 
     if not execute_now:
         run = run_repo.update_run(db, run, status=RunStatus.PENDING.value)
@@ -47,11 +39,6 @@ def create_run(
     run = run_repo.update_run(db, run, status=RunStatus.RUNNING.value)
 
     context = RunContext(run_id=run.id, session_id=session.id)
-    registry = SkillRegistry.default(
-        workspace_root=settings.workspace_root,
-        search_provider=settings.search_provider,
-        searxng_base_url=settings.searxng_base_url,
-    )
     runner = TaskRunner(planner=Planner(), executor=Executor(skill_registry=registry))
 
     result, events = runner.run(request, context)
