@@ -19,6 +19,9 @@ class EventType(str, Enum):
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"
     TOOL_FAILED = "tool.failed"
+    SYNTHESIS_STARTED = "synthesis.started"
+    SYNTHESIS_COMPLETED = "synthesis.completed"
+    SYNTHESIS_FAILED = "synthesis.failed"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
 
@@ -44,6 +47,19 @@ class PlanStep(BaseModel):
     skill_input: dict[str, Any] = Field(default_factory=dict)
 
 
+class EvidenceItem(BaseModel):
+    source_type: str
+    source_ref: str
+    title: str | None = None
+    excerpt: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceBundle(BaseModel):
+    items: list[EvidenceItem] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class StepExecutionResult(BaseModel):
     step_id: str
     success: bool
@@ -52,11 +68,24 @@ class StepExecutionResult(BaseModel):
     error: str | None = None
 
 
+class SynthesisMetadata(BaseModel):
+    mode: str
+    status: str
+    provider: str | None = None
+    model: str | None = None
+    provider_status: str | None = None
+    provider_usage_summary: str | None = None
+    error_summary: str | None = None
+
+
 class RunExecutionResult(BaseModel):
     status: RunStatus
     output: str
     plan: list[PlanStep] = Field(default_factory=list)
     step_results: list[StepExecutionResult] = Field(default_factory=list)
+    execution_summary: dict[str, Any] = Field(default_factory=dict)
+    evidence: EvidenceBundle = Field(default_factory=EvidenceBundle)
+    synthesis: SynthesisMetadata | None = None
 
 
 class TraceEvent(BaseModel):

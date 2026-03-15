@@ -7,10 +7,12 @@ _FILE_HINT_RE = re.compile(
     r"(?:\./|/|[\w\-]+\.[a-zA-Z0-9]{1,8}|read\s+file|list\s+(?:files|directory|dir)|repo|directory)",
     re.IGNORECASE,
 )
+_RESEARCH_HINT_RE = re.compile(r"\b(research|find|compare|look\s*up|pricing|documentation|docs)\b", re.IGNORECASE)
+_COMPARE_HINT_RE = re.compile(r"\b(compare|versus|vs\.?|difference)\b", re.IGNORECASE)
 
 
 class Planner:
-    """Deterministic planner for the alpha execution slice."""
+    """Deterministic planner for alpha research execution."""
 
     def create_plan(self, request: AgentRequest) -> list[PlanStep]:
         task = request.task.strip()
@@ -22,7 +24,7 @@ class Planner:
             operation = "list_directory" if self._looks_like_directory_request(task) else "read_text_file"
             steps.append(
                 PlanStep(
-                    id="step-1",
+                    id=self._step_id(steps),
                     title=f"Use filesystem.{operation} for {file_path}",
                     skill_name="filesystem",
                     skill_input={"operation": operation, "path": file_path},
@@ -30,41 +32,69 @@ class Planner:
             )
 
         if urls and self._allows_skill(request, "fetch"):
-            next_id = f"step-{len(steps) + 1}"
             steps.append(
                 PlanStep(
-                    id=next_id,
+                    id=self._step_id(steps),
                     title=f"Fetch content from {urls[0]}",
                     skill_name="fetch",
-                    skill_input={"url": urls[0]},
+                    skill_input={"url": urls[0], "source": "direct_url"},
                 )
             )
+            return steps
+
+        if self._is_research_task(task) and self._allows_skill(request, "web_search"):
+            max_results = 5 if self._is_comparison_task(task) else 4
+            fetch_limit = 3 if self._is_comparison_task(task) else 2
+            steps.append(
+                PlanStep(
+                    id=self._step_id(steps),
+                    title=f"Search web for: {task[:80]}",
+                    skill_name="web_search",
+                    skill_input={
+                        "query": self._search_query(task),
+                        "max_results": max_results,
+                        "timeout_seconds": 8.0,
+                    },
+                )
+            )
+            steps.append(
+                PlanStep(
+                    id=self._step_id(steps),
+                    title="Fetch top search results",
+                    skill_name="fetch",
+                    skill_input={"from_search": True, "max_urls": fetch_limit},
+                )
+            )
+            return steps
 
         if steps:
             return steps
 
+        if self._is_research_task(task) and not self._allows_skill(request, "web_search"):
+            return [PlanStep(id="step-1", title="Cannot perform research because web_search skill is disabled")]
         if urls:
-            return [
-                PlanStep(
-                    id="step-1",
-                    title="Cannot fetch URL because fetch skill is disabled",
-                )
-            ]
-
+            return [PlanStep(id="step-1", title="Cannot fetch URL because fetch skill is disabled")]
         if file_path or _FILE_HINT_RE.search(task):
-            return [
-                PlanStep(
-                    id="step-1",
-                    title="Cannot access filesystem because filesystem skill is disabled",
-                )
-            ]
+            return [PlanStep(id="step-1", title="Cannot access filesystem because filesystem skill is disabled")]
 
-        return [
-            PlanStep(
-                id="step-1",
-                title="No executable tools inferred from task; provide a file path or URL.",
-            )
-        ]
+        return [PlanStep(id="step-1", title="No executable tools inferred from task; provide a file path or URL.")]
+
+    @staticmethod
+    def _step_id(steps: list[PlanStep]) -> str:
+        return f"step-{len(steps) + 1}"
+
+    @staticmethod
+    def _search_query(task: str) -> str:
+        cleaned = re.sub(r"\s+", " ", task).strip()
+        return cleaned[:280]
+
+    @staticmethod
+    def _is_research_task(task: str) -> bool:
+        return bool(_RESEARCH_HINT_RE.search(task))
+
+    @staticmethod
+    def _is_comparison_task(task: str) -> bool:
+        return bool(_COMPARE_HINT_RE.search(task))
 
     @staticmethod
     def _extract_path(task: str) -> str | None:
