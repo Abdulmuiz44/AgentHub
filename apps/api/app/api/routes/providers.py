@@ -8,6 +8,7 @@ from app.api.schemas import (
     ProviderModelsResponse,
     ProviderSummaryResponse,
 )
+from models.base import ProviderHealthCheck
 from models.registry import (
     ProviderConfigurationStatus,
     ProviderLookupResult,
@@ -22,6 +23,14 @@ def _lookup_provider_or_404(registry: ProviderRegistry, provider_name: str) -> P
     if not provider.exists:
         raise HTTPException(status_code=404, detail="Provider not found")
     return provider
+
+
+def _safe_health_check_message(provider_name: str, health_check: ProviderHealthCheck) -> str:
+    if health_check.message and health_check.message.strip():
+        return health_check.message
+    if health_check.healthy:
+        return f"{provider_name} provider is healthy"
+    return f"{provider_name} provider health check failed"
 
 
 @router.get("/providers", response_model=list[ProviderSummaryResponse])
@@ -46,18 +55,33 @@ def list_provider_models(provider: str | None = Query(default=None)) -> Provider
     else:
         entries = registry.list_entries()
 
-    return ProviderModelsResponse(
-        providers=[
+    providers: list[ProviderModelsItemResponse] = []
+    for entry in entries:
+        models = list(entry.capability.models)
+        message: str | None = None
+
+        if entry.is_configured:
+            try:
+                resolved_models = entry.adapter.list_models()
+                if resolved_models:
+                    models = resolved_models
+                else:
+                    message = "Unable to fetch provider models; showing defaults"
+            except Exception:
+                message = "Unable to fetch provider models; showing defaults"
+
+        providers.append(
             ProviderModelsItemResponse(
                 provider_name=entry.capability.name,
                 display_name=entry.capability.display_name,
                 configuration_status=entry.configuration_status.value,
                 is_configured=entry.is_configured,
-                models=entry.capability.models,
+                models=models,
+                message=message,
             )
-            for entry in entries
-        ]
-    )
+        )
+
+    return ProviderModelsResponse(providers=providers)
 
 
 @router.post("/providers/health-check", response_model=ProviderHealthCheckResponse)
@@ -82,9 +106,19 @@ def health_check_provider(payload: ProviderHealthCheckRequest) -> ProviderHealth
             message="Provider is unavailable",
         )
 
+    try:
+        health_check = adapter.health_check()
+    except Exception:
+        return ProviderHealthCheckResponse(
+            provider=payload.provider,
+            configuration_status=provider.configuration_status.value,
+            healthy=False,
+            message="Provider health check failed",
+        )
+
     return ProviderHealthCheckResponse(
         provider=payload.provider,
         configuration_status=provider.configuration_status.value,
-        healthy=True,
-        message="Provider is healthy",
+        healthy=health_check.healthy,
+        message=_safe_health_check_message(payload.provider, health_check),
     )

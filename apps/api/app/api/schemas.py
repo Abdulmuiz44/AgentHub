@@ -78,6 +78,7 @@ class ProviderModelsItemResponse(BaseModel):
     configuration_status: str
     is_configured: bool
     models: list[str] = Field(default_factory=list)
+    message: str | None = None
 
 
 class ProviderModelsResponse(BaseModel):
