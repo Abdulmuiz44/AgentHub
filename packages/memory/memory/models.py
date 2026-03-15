@@ -1,5 +1,8 @@
 from datetime import datetime
+from typing import Any
 
+from sqlalchemy import Column
+from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
 
@@ -20,6 +23,8 @@ class Run(SQLModel, table=True):
     synthesis_mode: str | None = None
     synthesis_status: str | None = None
     synthesis_error_summary: str | None = None
+    execution_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    evidence_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
