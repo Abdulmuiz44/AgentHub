@@ -15,8 +15,10 @@ class Run(SQLModel, table=True):
     task: str
     provider: str
     model: str
-    status: str = "queued"
+    status: str = "pending"
+    final_output: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class TraceEventRecord(SQLModel, table=True):

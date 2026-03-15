@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class RunStatus(str, Enum):
-    QUEUED = "queued"
+    PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -15,8 +15,10 @@ class RunStatus(str, Enum):
 class EventType(str, Enum):
     RUN_STARTED = "run.started"
     PLAN_CREATED = "plan.created"
-    TOOL_CALLED = "tool.called"
+    TOOL_REQUESTED = "tool.requested"
+    TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"
+    TOOL_FAILED = "tool.failed"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
 
@@ -24,8 +26,8 @@ class EventType(str, Enum):
 class AgentRequest(BaseModel):
     task: str
     session_id: int | None = None
-    provider: str
-    model: str
+    provider: str = "builtin"
+    model: str = "deterministic"
     enabled_skills: list[str] = Field(default_factory=list)
 
 
@@ -38,19 +40,23 @@ class RunContext(BaseModel):
 class PlanStep(BaseModel):
     id: str
     title: str
-    status: RunStatus = RunStatus.QUEUED
+    skill_name: str | None = None
+    skill_input: dict[str, Any] = Field(default_factory=dict)
 
 
-class ToolCall(BaseModel):
-    tool_name: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
-
-
-class ToolResult(BaseModel):
-    tool_name: str
+class StepExecutionResult(BaseModel):
+    step_id: str
     success: bool
+    summary: str
     output: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
+
+
+class RunExecutionResult(BaseModel):
+    status: RunStatus
+    output: str
+    plan: list[PlanStep] = Field(default_factory=list)
+    step_results: list[StepExecutionResult] = Field(default_factory=list)
 
 
 class TraceEvent(BaseModel):

@@ -2,16 +2,31 @@ import json
 
 from sqlmodel import Session as DBSession
 
-from core.contracts import AgentRequest, EventType, PlanStep, RunContext, RunStatus
+from app.config import settings
+from app.services.sessions import create_session, get_session_by_id
+from core.contracts import AgentRequest, RunContext, RunStatus, TraceEvent
+from core.executor import Executor
+from core.planner import Planner
+from core.task_runner import TaskRunner
 from memory import runs as run_repo
 from memory import traces as trace_repo
 from memory.models import Run, Session, TraceEventRecord
-from app.services.sessions import create_session, get_session_by_id
+from skills.registry import SkillRegistry
+
+
+def _persist_trace_events(db: DBSession, run_id: int, events: list[TraceEvent]) -> list[TraceEventRecord]:
+    records: list[TraceEventRecord] = []
+    for event in events:
+        payload = json.dumps(event.payload)
+        records.append(trace_repo.add_trace_event(db, run_id, event.event_type.value, payload))
+    return records
 
 
 def create_run(
     db: DBSession,
     request: AgentRequest,
+    *,
+    execute_now: bool = True,
 ) -> tuple[Run, Session, list[TraceEventRecord]]:
     session = get_session_by_id(db, request.session_id) if request.session_id else None
     if session is None:
@@ -25,23 +40,21 @@ def create_run(
         session_id=session.id,
     )
 
+    if not execute_now:
+        run = run_repo.update_run(db, run, status=RunStatus.PENDING.value)
+        return run, session, []
+
+    run = run_repo.update_run(db, run, status=RunStatus.RUNNING.value)
+
     context = RunContext(run_id=run.id, session_id=session.id)
-    started_payload = json.dumps({"status": RunStatus.RUNNING.value, "context": context.model_dump(mode="json")})
-    plan_payload = json.dumps(
-        {
-            "plan": [PlanStep(id="step-1", title="placeholder planning step").model_dump(mode="json")],
-            "requested_skills": request.enabled_skills,
-        }
-    )
-    events = [
-        trace_repo.add_trace_event(db, run.id, EventType.RUN_STARTED.value, started_payload),
-        trace_repo.add_trace_event(db, run.id, EventType.PLAN_CREATED.value, plan_payload),
-    ]
-    run.status = RunStatus.RUNNING.value
-    db.add(run)
-    db.commit()
-    db.refresh(run)
-    return run, session, events
+    registry = SkillRegistry.default(workspace_root=settings.workspace_root)
+    runner = TaskRunner(planner=Planner(), executor=Executor(skill_registry=registry))
+
+    result, events = runner.run(request, context)
+    persisted_events = _persist_trace_events(db, run.id, events)
+    run = run_repo.update_run(db, run, status=result.status.value, final_output=result.output)
+
+    return run, session, persisted_events
 
 
 def get_run(db: DBSession, run_id: int) -> Run | None:

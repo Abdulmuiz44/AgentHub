@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .base import Skill, SkillCapability, SkillManifest
+from .base import Skill, SkillCapability, SkillManifest, SkillRequest, SkillResult
 
 
 class FilesystemConfig:
@@ -55,14 +55,23 @@ class FilesystemSkill(Skill):
         except UnicodeDecodeError as exc:
             raise FilesystemValidationError("Only UTF-8 text files are supported") from exc
 
-    def execute(self, payload: dict[str, str]) -> dict[str, object]:
-        operation = payload.get("operation")
-        path = payload.get("path", ".")
-        if operation == "list_directory":
-            return {"entries": self.list_directory(path)}
-        if operation == "read_text_file":
-            return {"content": self.read_text_file(path)}
-        raise FilesystemValidationError(f"Unsupported operation: {operation}")
+    def execute(self, request: SkillRequest) -> SkillResult:
+        operation = request.operation or request.input.get("operation")
+        path = str(request.input.get("path", "."))
+        try:
+            if operation == "list_directory":
+                entries = self.list_directory(path)
+                return SkillResult(success=True, output={"entries": entries, "path": path}, summary=f"Listed {len(entries)} entries")
+            if operation == "read_text_file":
+                content = self.read_text_file(path)
+                return SkillResult(
+                    success=True,
+                    output={"content": content, "path": path, "chars": len(content)},
+                    summary=f"Read {len(content)} chars from {path}",
+                )
+            return SkillResult(success=False, error=f"Unsupported operation: {operation}")
+        except FilesystemValidationError as exc:
+            return SkillResult(success=False, error=str(exc))
 
 
 def load_manifests(_path: str) -> list[SkillManifest]:
