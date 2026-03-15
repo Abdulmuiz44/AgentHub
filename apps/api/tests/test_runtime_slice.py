@@ -85,6 +85,8 @@ def test_run_execution_and_trace_routes() -> None:
         run_id = payload["run"]["id"]
         assert payload["run"]["status"] in {"completed", "failed"}
         assert payload["run"]["final_output"]
+        assert payload["run"]["synthesis_mode"] == "deterministic_fallback"
+        assert payload["run"]["synthesis_status"] == "completed"
 
         get_run = client.get(f"/runs/{run_id}")
         assert get_run.status_code == 200
@@ -95,6 +97,9 @@ def test_run_execution_and_trace_routes() -> None:
         event_types = [item["event_type"] for item in trace.json()]
         assert "run.started" in event_types
         assert "plan.created" in event_types
+        assert "synthesis.started" in event_types
+        assert "synthesis.completed" in event_types
+        assert "synthesis.failed" in event_types
         assert event_types[-1] in {"run.completed", "run.failed"}
 
         plan_event = next(item for item in trace.json() if item["event_type"] == "plan.created")

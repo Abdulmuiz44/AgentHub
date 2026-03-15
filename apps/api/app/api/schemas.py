@@ -39,6 +39,9 @@ class RunResponse(BaseModel):
     model: str
     status: str
     final_output: str | None = None
+    synthesis_mode: str | None = None
+    synthesis_status: str | None = None
+    synthesis_error_summary: str | None = None
     created_at: datetime
     updated_at: datetime
 
