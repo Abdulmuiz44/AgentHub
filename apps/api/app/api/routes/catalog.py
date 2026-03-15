@@ -1,16 +1,9 @@
 from fastapi import APIRouter
 
-from models.registry import ProviderRegistry
 from skills.registry import SkillRegistry
 from app.config import settings
 
 router = APIRouter(tags=["catalog"])
-
-
-@router.get("/providers")
-def list_providers() -> list[dict[str, str | list[str] | bool]]:
-    return [p.model_dump() for p in ProviderRegistry.default().capabilities()]
-
 
 @router.get("/skills")
 def list_skills() -> list[dict[str, object]]:

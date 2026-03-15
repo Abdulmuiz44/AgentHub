@@ -54,3 +54,39 @@ class RunExecutionSummary(BaseModel):
     output: str
     plan: list[dict[str, Any]] = Field(default_factory=list)
     step_results: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProviderMetadata(BaseModel):
+    name: str
+    display_name: str
+    models: list[str] = Field(default_factory=list)
+    supports_streaming: bool = False
+
+
+class ProviderSummaryResponse(BaseModel):
+    provider: ProviderMetadata
+    configuration_status: str
+    is_configured: bool
+
+
+class ProviderModelsItemResponse(BaseModel):
+    provider_name: str
+    display_name: str
+    configuration_status: str
+    is_configured: bool
+    models: list[str] = Field(default_factory=list)
+
+
+class ProviderModelsResponse(BaseModel):
+    providers: list[ProviderModelsItemResponse] = Field(default_factory=list)
+
+
+class ProviderHealthCheckRequest(BaseModel):
+    provider: str = Field(min_length=1)
+
+
+class ProviderHealthCheckResponse(BaseModel):
+    provider: str
+    configuration_status: str
+    healthy: bool
+    message: str
