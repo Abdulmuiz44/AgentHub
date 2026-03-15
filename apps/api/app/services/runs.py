@@ -52,7 +52,15 @@ def create_run(
 
     result, events = runner.run(request, context)
     persisted_events = _persist_trace_events(db, run.id, events)
-    run = run_repo.update_run(db, run, status=result.status.value, final_output=result.output)
+    run = run_repo.update_run(
+        db,
+        run,
+        status=result.status.value,
+        final_output=result.output,
+        synthesis_mode=result.synthesis.mode if result.synthesis else None,
+        synthesis_status=result.synthesis.status if result.synthesis else None,
+        synthesis_error_summary=result.synthesis.error_summary if result.synthesis else None,
+    )
 
     return run, session, persisted_events
 

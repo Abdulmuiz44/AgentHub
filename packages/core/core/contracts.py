@@ -19,6 +19,9 @@ class EventType(str, Enum):
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"
     TOOL_FAILED = "tool.failed"
+    SYNTHESIS_STARTED = "synthesis.started"
+    SYNTHESIS_COMPLETED = "synthesis.completed"
+    SYNTHESIS_FAILED = "synthesis.failed"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
 
@@ -52,11 +55,20 @@ class StepExecutionResult(BaseModel):
     error: str | None = None
 
 
+class SynthesisMetadata(BaseModel):
+    mode: str
+    status: str
+    provider: str | None = None
+    model: str | None = None
+    error_summary: str | None = None
+
+
 class RunExecutionResult(BaseModel):
     status: RunStatus
     output: str
     plan: list[PlanStep] = Field(default_factory=list)
     step_results: list[StepExecutionResult] = Field(default_factory=list)
+    synthesis: SynthesisMetadata | None = None
 
 
 class TraceEvent(BaseModel):

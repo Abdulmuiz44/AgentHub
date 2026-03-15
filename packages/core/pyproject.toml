@@ -2,7 +2,7 @@
 name = "agenthub-core"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2.8.0", "agenthub-skills"]
+dependencies = ["pydantic>=2.8.0", "agenthub-skills", "agenthub-models"]
 
 [build-system]
 requires = ["hatchling>=1.25.0"]
@@ -14,3 +14,4 @@ packages = ["core"]
 
 [tool.uv.sources]
 agenthub-skills = { workspace = true }
+agenthub-models = { workspace = true }

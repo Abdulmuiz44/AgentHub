@@ -17,6 +17,9 @@ class Run(SQLModel, table=True):
     model: str
     status: str = "pending"
     final_output: str | None = None
+    synthesis_mode: str | None = None
+    synthesis_status: str | None = None
+    synthesis_error_summary: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

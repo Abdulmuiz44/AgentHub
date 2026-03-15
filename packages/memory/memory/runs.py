@@ -13,9 +13,21 @@ def create_run(db: DBSession, task: str, provider: str, model: str, session_id: 
     return run
 
 
-def update_run(db: DBSession, run: Run, *, status: str, final_output: str | None = None) -> Run:
+def update_run(
+    db: DBSession,
+    run: Run,
+    *,
+    status: str,
+    final_output: str | None = None,
+    synthesis_mode: str | None = None,
+    synthesis_status: str | None = None,
+    synthesis_error_summary: str | None = None,
+) -> Run:
     run.status = status
     run.final_output = final_output
+    run.synthesis_mode = synthesis_mode
+    run.synthesis_status = synthesis_status
+    run.synthesis_error_summary = synthesis_error_summary
     run.updated_at = datetime.utcnow()
     db.add(run)
     db.commit()
