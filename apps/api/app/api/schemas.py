@@ -46,6 +46,7 @@ class RunResponse(BaseModel):
 class RunCreateResponse(BaseModel):
     run: RunResponse
     trace_events: list[TraceResponse]
+    execution_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunExecutionSummary(BaseModel):

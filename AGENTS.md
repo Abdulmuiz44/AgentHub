@@ -25,7 +25,14 @@
 - `POST /runs` executes synchronously by default (`execute_now=true`).
 - Planner is deterministic and supports URL/filepath heuristics only.
 - Runtime invokes built-in skills (`filesystem`, `fetch`) and persists ordered trace events.
+- Optional synthesis can run after deterministic execution when provider config exists.
+- If synthesis provider config is missing, runtime falls back to deterministic output and emits `synthesis.skipped`.
 - Runs persist status transitions (`pending`, `running`, `completed`, `failed`) and `final_output`.
+- Provider catalog endpoints include `/providers`, `/providers/models`, `/providers/health-check`.
+
+## Environment configuration
+- OpenAI synthesis: `AGENTHUB_OPENAI_API_KEY` (required), `AGENTHUB_OPENAI_BASE_URL` (optional), `AGENTHUB_OPENAI_DEFAULT_MODEL`.
+- Ollama synthesis: `AGENTHUB_OLLAMA_BASE_URL` (required), `AGENTHUB_OLLAMA_DEFAULT_MODEL`.
 
 ## Definition of done (small tasks)
 - API starts and health route responds.

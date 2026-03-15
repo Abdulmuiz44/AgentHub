@@ -21,9 +21,4 @@ class TaskRunner:
         )
 
         result = self.executor.execute(context=context, steps=plan, trace_collector=traces)
-        if result.status.value == "completed":
-            traces.record_simple(context.run_id, EventType.RUN_COMPLETED, {"status": result.status.value, "output": result.output})
-        else:
-            traces.record_simple(context.run_id, EventType.RUN_FAILED, {"status": result.status.value, "output": result.output})
-
         return result, traces.events()

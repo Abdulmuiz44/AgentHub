@@ -2,10 +2,11 @@
 
 AgentHub is a local-first, cloud-optional platform for running AI agents.
 
-This repository now includes a first real execution slice:
+This repository includes a real execution slice:
 - FastAPI backend with SQLite-backed sessions/runs/traces
-- Synchronous runtime loop (planner + executor + tracing)
+- Synchronous deterministic runtime loop (planner + executor + tracing)
 - Built-in executable skills: read-only filesystem + HTTP fetch
+- Optional provider synthesis pass after deterministic execution
 - Next.js dashboard showing run status, output, and trace preview
 
 ## Repository layout
@@ -41,6 +42,24 @@ npm run dev
 ```
 
 The dashboard uses `NEXT_PUBLIC_API_BASE` or defaults to `http://localhost:8000`.
+
+## Provider synthesis configuration (optional)
+
+Runtime execution is always deterministic first. A synthesis step is optional and only runs when a non-`builtin` provider is requested and configured.
+
+- OpenAI requires `AGENTHUB_OPENAI_API_KEY`
+- Ollama requires `AGENTHUB_OLLAMA_BASE_URL`
+- Optional defaults:
+  - `AGENTHUB_OPENAI_DEFAULT_MODEL` (default: `gpt-4o-mini`)
+  - `AGENTHUB_OLLAMA_DEFAULT_MODEL` (default: `llama3.1`)
+
+If provider configuration is missing, the run falls back to deterministic output and records `synthesis.skipped` trace metadata.
+
+## Provider catalog endpoints
+
+- `GET /providers`
+- `GET /providers/models`
+- `GET /providers/health-check`
 
 ## Supported task types (current milestone)
 

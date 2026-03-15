@@ -19,6 +19,10 @@ class EventType(str, Enum):
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"
     TOOL_FAILED = "tool.failed"
+    SYNTHESIS_REQUESTED = "synthesis.requested"
+    SYNTHESIS_SKIPPED = "synthesis.skipped"
+    SYNTHESIS_COMPLETED = "synthesis.completed"
+    SYNTHESIS_FAILED = "synthesis.failed"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
 

@@ -18,10 +18,11 @@ def create_run_route(payload: RunCreateRequest, db: DBSession = Depends(get_sess
         model=payload.model,
         enabled_skills=payload.enabled_skills,
     )
-    run, _session, events = create_run(db, request, execute_now=payload.execute_now)
+    run, _session, events, metadata = create_run(db, request, execute_now=payload.execute_now)
     return {
         "run": run,
         "trace_events": events,
+        "execution_metadata": metadata,
     }
 
 
