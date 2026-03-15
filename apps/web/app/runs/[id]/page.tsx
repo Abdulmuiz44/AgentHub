@@ -68,6 +68,21 @@ export default function RunDetailPage() {
     () => trace.filter((event) => event.event_type.startsWith("synth")),
     [trace]
   );
+  const fetchedSources = useMemo(() => {
+    const urls: string[] = [];
+    for (const event of trace) {
+      const output = event.parsedPayload?.output as Record<string, unknown> | undefined;
+      const pages = output?.fetched_pages as Array<Record<string, unknown>> | undefined;
+      if (!pages) continue;
+      for (const page of pages) {
+        const url = String(page.url ?? "").trim();
+        if (url && !urls.includes(url)) {
+          urls.push(url);
+        }
+      }
+    }
+    return urls;
+  }, [trace]);
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
@@ -90,6 +105,8 @@ export default function RunDetailPage() {
           <p className="text-sm">Provider: {run.provider}</p>
           <p className="text-sm">Model: {run.model}</p>
           <p className="text-sm">Synthesis mode: {run.synthesis_mode ?? "n/a"}</p>
+          <p className="text-sm">Synthesis status: {run.synthesis_status ?? "n/a"}</p>
+          <p className="text-sm">Evidence summary: {JSON.stringify(run.evidence_summary ?? {})}</p>
         </section>
       ) : null}
 
@@ -114,8 +131,18 @@ export default function RunDetailPage() {
         <article className="space-y-2 rounded-lg border border-slate-700 p-4">
           <h2 className="text-lg font-medium">Synthesis summary</h2>
           <p className="text-sm text-slate-300">Synthesis events: {synthesisEvents.length}</p>
-          <p className="text-xs text-slate-400">Runtime currently emits synthesis details when available.</p>
+          <p className="text-xs text-slate-400">Mode: {run?.synthesis_mode ?? "n/a"}. Status: {run?.synthesis_status ?? "n/a"}.</p>
         </article>
+      </section>
+
+      <section className="space-y-2 rounded-lg border border-slate-700 p-4">
+        <h2 className="text-lg font-medium">Fetched sources</h2>
+        {fetchedSources.length === 0 ? <p className="text-sm text-slate-400">No fetched web sources recorded.</p> : null}
+        <ul className="list-disc pl-5 text-xs text-slate-300">
+          {fetchedSources.map((url) => (
+            <li key={url}>{url}</li>
+          ))}
+        </ul>
       </section>
 
       <section className="space-y-2 rounded-lg border border-slate-700 p-4">

@@ -17,6 +17,9 @@ export type RunResponse = {
   final_output?: string | null;
   synthesis_mode?: string | null;
   synthesis_status?: string | null;
+  synthesis_error_summary?: string | null;
+  execution_summary?: Record<string, unknown>;
+  evidence_summary?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };
