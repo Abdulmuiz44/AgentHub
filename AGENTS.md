@@ -1,4 +1,4 @@
-# AgentHub Contributor Guide
+﻿# AgentHub Contributor Guide
 
 ## Repo layout
 - `apps/api`: FastAPI service
@@ -22,12 +22,14 @@
 - Avoid speculative abstractions and advanced product surface.
 
 ## Runtime slice (current alpha)
-- `POST /runs` executes synchronously by default (`execute_now=true`).
-- Planner is deterministic and now supports URL/filepath heuristics plus research/comparison verbs.
-- Runtime invokes built-in skills (`filesystem`, `fetch`, `web_search`) and persists ordered trace events.
-- Research runs can execute bounded `web_search -> fetch` workflows and aggregate evidence.
-- Runs persist status transitions (`pending`, `running`, `completed`, `failed`) and `final_output`.
-- Run records include synthesis and compact execution/evidence summaries.
+- `POST /runs` persists a queued run and returns immediately.
+- The API starts a bounded in-process worker for local async execution.
+- Run lifecycle now includes `pending`, `queued`, `running`, `waiting_for_approval`, `completed`, `failed`, and `cancelled`.
+- Runs persist compact execution checkpoints (`plan`, current step index, step results, evidence summary, pending approval refs).
+- Approval-required steps create approval records, pause the run, and resume after approval grant.
+- Approval denial fails the run with clear trace output.
+- `POST /runs/{id}/cancel` cancels queued/waiting runs immediately and requests cooperative cancellation for running runs.
+- `GET /runs/{id}/stream` streams live trace/status updates for the run detail page.
 
 ## Search configuration
 - Optional `AGENTHUB_SEARCH_PROVIDER` (`searxng`, `duckduckgo`, `duckduckgo_instant`).

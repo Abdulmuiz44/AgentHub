@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: agenthub-api
+Version: 0.1.0
+Summary: AgentHub API scaffold
+Requires-Python: >=3.12
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn>=0.30.0
+Requires-Dist: pydantic>=2.8.0
+Requires-Dist: pydantic-settings>=2.4.0
+Requires-Dist: sqlmodel>=0.0.22
+Requires-Dist: agenthub-core
+Requires-Dist: agenthub-models
+Requires-Dist: agenthub-skills
+Requires-Dist: agenthub-memory
+Requires-Dist: agenthub-safety
+Requires-Dist: agenthub-registry
+Requires-Dist: agenthub-sdk
