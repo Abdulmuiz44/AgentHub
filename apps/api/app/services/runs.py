@@ -47,7 +47,11 @@ def create_run(
     run = run_repo.update_run(db, run, status=RunStatus.RUNNING.value)
 
     context = RunContext(run_id=run.id, session_id=session.id)
-    registry = SkillRegistry.default(workspace_root=settings.workspace_root)
+    registry = SkillRegistry.default(
+        workspace_root=settings.workspace_root,
+        search_provider=settings.search_provider,
+        searxng_base_url=settings.searxng_base_url,
+    )
     runner = TaskRunner(planner=Planner(), executor=Executor(skill_registry=registry))
 
     result, events = runner.run(request, context)
@@ -60,6 +64,8 @@ def create_run(
         synthesis_mode=result.synthesis.mode if result.synthesis else None,
         synthesis_status=result.synthesis.status if result.synthesis else None,
         synthesis_error_summary=result.synthesis.error_summary if result.synthesis else None,
+        execution_summary=result.execution_summary,
+        evidence_summary={"items": len(result.evidence.items), "notes": len(result.evidence.notes)},
     )
 
     return run, session, persisted_events
