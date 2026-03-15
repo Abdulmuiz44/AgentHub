@@ -21,6 +21,12 @@
 - Deliver only the requested slice.
 - Avoid speculative abstractions and advanced product surface.
 
+## Runtime slice (current alpha)
+- `POST /runs` executes synchronously by default (`execute_now=true`).
+- Planner is deterministic and supports URL/filepath heuristics only.
+- Runtime invokes built-in skills (`filesystem`, `fetch`) and persists ordered trace events.
+- Runs persist status transitions (`pending`, `running`, `completed`, `failed`) and `final_output`.
+
 ## Definition of done (small tasks)
 - API starts and health route responds.
 - Touched endpoints have persistence-backed behavior.

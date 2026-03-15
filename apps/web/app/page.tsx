@@ -2,31 +2,33 @@
 
 import { FormEvent, useMemo, useState } from "react";
 
-import { createRun } from "../lib/api";
+import { CreateRunResult, createRun } from "../lib/api";
 
-const providers = ["ollama", "openai"];
+const providers = ["ollama", "openai", "builtin"];
 const modelsByProvider: Record<string, string[]> = {
   ollama: ["llama3.1", "qwen2.5"],
   openai: ["gpt-4o-mini", "gpt-4.1-mini"],
+  builtin: ["deterministic"],
 };
 
 export default function DashboardPage() {
   const [task, setTask] = useState("");
-  const [provider, setProvider] = useState("ollama");
-  const [model, setModel] = useState(modelsByProvider.ollama[0]);
+  const [provider, setProvider] = useState("builtin");
+  const [model, setModel] = useState(modelsByProvider.builtin[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const enabledSkills = useMemo(() => ["filesystem"], []);
+  const [runResult, setRunResult] = useState<CreateRunResult | null>(null);
+  const enabledSkills = useMemo(() => ["filesystem", "fetch"], []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
+    setRunResult(null);
     setIsSubmitting(true);
     try {
-      const result = await createRun({ task, provider, model, enabled_skills: enabledSkills });
-      setMessage(
-        `Run #${result.run.id} (${result.run.status}) created in session #${result.run.session_id}; trace events: ${result.trace_events.length}`,
-      );
+      const result = await createRun({ task, provider, model, enabled_skills: enabledSkills, execute_now: true });
+      setRunResult(result);
+      setMessage(`Run #${result.run.id} finished with status ${result.run.status}.`);
       setTask("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unexpected error");
@@ -89,10 +91,27 @@ export default function DashboardPage() {
           disabled={isSubmitting}
           className="rounded bg-blue-600 px-4 py-2 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isSubmitting ? "Submitting..." : "Submit"}
+          {isSubmitting ? "Executing run..." : "Submit"}
         </button>
       </form>
       {message ? <p className="mt-4 text-sm text-slate-200">{message}</p> : null}
+
+      {runResult ? (
+        <section className="mt-6 space-y-2 rounded-lg border border-slate-700 p-4">
+          <h2 className="text-lg font-medium">Run Result</h2>
+          <p className="text-sm">Run ID: {runResult.run.id}</p>
+          <p className="text-sm">Status: {runResult.run.status}</p>
+          <p className="text-sm whitespace-pre-wrap">Final output: {runResult.run.final_output ?? "(none)"}</p>
+          <div>
+            <p className="text-sm font-medium">Trace preview</p>
+            <ul className="list-disc pl-5 text-xs text-slate-300">
+              {runResult.trace_events.slice(0, 5).map((event) => (
+                <li key={event.id}>{event.event_type}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }

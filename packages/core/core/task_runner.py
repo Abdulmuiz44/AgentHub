@@ -1,14 +1,29 @@
-from .contracts import AgentRequest, RunContext, RunStatus
+from .contracts import AgentRequest, EventType, RunContext, RunExecutionResult
 from .executor import Executor
 from .planner import Planner
+from .tracing import TraceCollector
 
 
 class TaskRunner:
-    def __init__(self, planner: Planner | None = None, executor: Executor | None = None):
-        self.planner = planner or Planner()
-        self.executor = executor or Executor()
+    def __init__(self, planner: Planner, executor: Executor):
+        self.planner = planner
+        self.executor = executor
 
-    def run(self, request: AgentRequest, context: RunContext) -> RunStatus:
-        _ = context
+    def run(self, request: AgentRequest, context: RunContext) -> tuple[RunExecutionResult, list]:
+        traces = TraceCollector()
+        traces.record_simple(context.run_id, EventType.RUN_STARTED, {"status": "running", "context": context.model_dump(mode="json")})
+
         plan = self.planner.create_plan(request)
-        return self.executor.execute(plan)
+        traces.record_simple(
+            context.run_id,
+            EventType.PLAN_CREATED,
+            {"plan": [item.model_dump(mode="json") for item in plan], "requested_skills": request.enabled_skills},
+        )
+
+        result = self.executor.execute(context=context, steps=plan, trace_collector=traces)
+        if result.status.value == "completed":
+            traces.record_simple(context.run_id, EventType.RUN_COMPLETED, {"status": result.status.value, "output": result.output})
+        else:
+            traces.record_simple(context.run_id, EventType.RUN_FAILED, {"status": result.status.value, "output": result.output})
+
+        return result, traces.events()

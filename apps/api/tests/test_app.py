@@ -23,9 +23,9 @@ def test_sessions_runs_and_catalog_flow() -> None:
         create_run = client.post(
             "/runs",
             json={
-                "task": "Summarize repo layout",
-                "provider": "ollama",
-                "model": "llama3.1",
+                "task": "Summarize README.md",
+                "provider": "builtin",
+                "model": "deterministic",
                 "session_id": session["id"],
                 "enabled_skills": ["filesystem"],
             },
@@ -33,6 +33,7 @@ def test_sessions_runs_and_catalog_flow() -> None:
         assert create_run.status_code == 200
         run_payload = create_run.json()
         run_id = run_payload["run"]["id"]
+        assert run_payload["run"]["status"] in {"completed", "failed"}
 
         get_run = client.get(f"/runs/{run_id}")
         assert get_run.status_code == 200
@@ -51,4 +52,4 @@ def test_sessions_runs_and_catalog_flow() -> None:
         skills = client.get("/skills")
         assert skills.status_code == 200
         skill_names = {item["name"] for item in skills.json()}
-        assert "filesystem" in skill_names
+        assert {"filesystem", "fetch"}.issubset(skill_names)

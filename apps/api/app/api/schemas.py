@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -15,10 +16,11 @@ class SessionResponse(BaseModel):
 
 class RunCreateRequest(BaseModel):
     task: str = Field(min_length=1)
-    provider: str
-    model: str
+    provider: str = "builtin"
+    model: str = "deterministic"
     session_id: int | None = None
     enabled_skills: list[str] = Field(default_factory=list)
+    execute_now: bool = True
 
 
 class TraceResponse(BaseModel):
@@ -36,9 +38,19 @@ class RunResponse(BaseModel):
     provider: str
     model: str
     status: str
+    final_output: str | None = None
     created_at: datetime
+    updated_at: datetime
 
 
 class RunCreateResponse(BaseModel):
     run: RunResponse
     trace_events: list[TraceResponse]
+
+
+class RunExecutionSummary(BaseModel):
+    run_id: int
+    status: str
+    output: str
+    plan: list[dict[str, Any]] = Field(default_factory=list)
+    step_results: list[dict[str, Any]] = Field(default_factory=list)

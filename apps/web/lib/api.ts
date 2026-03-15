@@ -4,6 +4,7 @@ export type CreateRunPayload = {
   model: string;
   session_id?: number;
   enabled_skills?: string[];
+  execute_now?: boolean;
 };
 
 export type RunResponse = {
@@ -13,7 +14,9 @@ export type RunResponse = {
   provider: string;
   model: string;
   status: string;
+  final_output?: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export type TraceResponse = {
