@@ -23,9 +23,11 @@
 
 ## Runtime slice (current alpha)
 - `POST /runs` executes synchronously by default (`execute_now=true`).
-- Planner is deterministic and supports URL/filepath heuristics only.
-- Runtime invokes built-in skills (`filesystem`, `fetch`) and persists ordered trace events.
-- Runs persist status transitions (`pending`, `running`, `completed`, `failed`) and `final_output`.
+- Planner/executor remain deterministic (URL/filepath heuristics + built-in skills).
+- Runtime includes a synthesis stage with provider path and deterministic fallback path.
+- Provider endpoints available: `/providers`, `/providers/models`, `/providers/health-check`.
+- Runs persist status transitions (`pending`, `running`, `completed`, `failed`), `final_output`, and synthesis metadata fields (`synthesis_mode`, `synthesis_status`, `synthesis_error_summary`).
+- Web run detail route `/runs/[id]` shows run summary + trace timeline.
 
 ## Definition of done (small tasks)
 - API starts and health route responds.
