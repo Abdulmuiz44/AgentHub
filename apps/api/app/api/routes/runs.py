@@ -9,6 +9,14 @@ from core.contracts import AgentRequest
 router = APIRouter(tags=["runs"])
 
 
+def _serialize_run(run) -> dict:
+    payload = run.model_dump()
+    payload["output"] = run.final_output
+    payload.setdefault("plan", [])
+    payload.setdefault("step_results", [])
+    return payload
+
+
 @router.post("/runs", response_model=RunCreateResponse)
 def create_run_route(payload: RunCreateRequest, db: DBSession = Depends(get_session)):
     request = AgentRequest(
@@ -20,7 +28,7 @@ def create_run_route(payload: RunCreateRequest, db: DBSession = Depends(get_sess
     )
     run, _session, events = create_run(db, request, execute_now=payload.execute_now)
     return {
-        "run": run,
+        "run": _serialize_run(run),
         "trace_events": events,
     }
 
@@ -30,7 +38,7 @@ def get_run_route(run_id: int, db: DBSession = Depends(get_session)):
     run = get_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return run
+    return _serialize_run(run)
 
 
 @router.get("/runs/{run_id}/trace", response_model=list[TraceResponse])

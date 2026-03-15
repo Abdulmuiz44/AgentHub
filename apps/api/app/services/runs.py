@@ -41,10 +41,26 @@ def create_run(
     )
 
     if not execute_now:
-        run = run_repo.update_run(db, run, status=RunStatus.PENDING.value)
+        run = run_repo.update_run(
+            db,
+            run,
+            status=RunStatus.PENDING.value,
+            synthesis_mode="runtime",
+            synthesis_status=RunStatus.PENDING.value,
+            synthesis_provider=request.provider,
+            synthesis_model=request.model,
+        )
         return run, session, []
 
-    run = run_repo.update_run(db, run, status=RunStatus.RUNNING.value)
+    run = run_repo.update_run(
+        db,
+        run,
+        status=RunStatus.RUNNING.value,
+        synthesis_mode="runtime",
+        synthesis_status=RunStatus.RUNNING.value,
+        synthesis_provider=request.provider,
+        synthesis_model=request.model,
+    )
 
     context = RunContext(run_id=run.id, session_id=session.id)
     registry = SkillRegistry.default(workspace_root=settings.workspace_root)
@@ -52,7 +68,17 @@ def create_run(
 
     result, events = runner.run(request, context)
     persisted_events = _persist_trace_events(db, run.id, events)
-    run = run_repo.update_run(db, run, status=result.status.value, final_output=result.output)
+    run = run_repo.update_run(
+        db,
+        run,
+        status=result.status.value,
+        final_output=result.output,
+        synthesis_mode="runtime",
+        synthesis_status=result.status.value,
+        synthesis_provider=request.provider,
+        synthesis_model=request.model,
+        synthesis_error=result.output if result.status == RunStatus.FAILED else None,
+    )
 
     return run, session, persisted_events
 

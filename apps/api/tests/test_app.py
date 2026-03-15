@@ -37,6 +37,9 @@ def test_sessions_runs_and_catalog_flow() -> None:
 
         get_run = client.get(f"/runs/{run_id}")
         assert get_run.status_code == 200
+        get_run_payload = get_run.json()
+        assert "synthesis_mode" in get_run_payload
+        assert "output" in get_run_payload
 
         trace = client.get(f"/runs/{run_id}/trace")
         assert trace.status_code == 200

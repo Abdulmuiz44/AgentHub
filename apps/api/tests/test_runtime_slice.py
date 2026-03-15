@@ -85,10 +85,19 @@ def test_run_execution_and_trace_routes() -> None:
         run_id = payload["run"]["id"]
         assert payload["run"]["status"] in {"completed", "failed"}
         assert payload["run"]["final_output"]
+        assert payload["run"]["synthesis_mode"] == "runtime"
+        assert payload["run"]["synthesis_provider"] == "builtin"
+        assert payload["run"]["synthesis_model"] == "deterministic"
+        assert payload["run"]["output"] == payload["run"]["final_output"]
+        assert isinstance(payload["run"]["plan"], list)
+        assert isinstance(payload["run"]["step_results"], list)
 
         get_run = client.get(f"/runs/{run_id}")
         assert get_run.status_code == 200
-        assert "final_output" in get_run.json()
+        run_body = get_run.json()
+        assert "final_output" in run_body
+        assert run_body["output"] == run_body["final_output"]
+        assert "synthesis_status" in run_body
 
         trace = client.get(f"/runs/{run_id}/trace")
         assert trace.status_code == 200

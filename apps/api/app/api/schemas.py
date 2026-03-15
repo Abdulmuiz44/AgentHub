@@ -39,6 +39,14 @@ class RunResponse(BaseModel):
     model: str
     status: str
     final_output: str | None = None
+    synthesis_mode: str | None = None
+    synthesis_status: str | None = None
+    synthesis_provider: str | None = None
+    synthesis_model: str | None = None
+    synthesis_error: str | None = None
+    output: str | None = None
+    plan: list[dict[str, Any]] = Field(default_factory=list)
+    step_results: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
