@@ -42,6 +42,17 @@ npm run dev
 
 The dashboard uses `NEXT_PUBLIC_API_BASE` or defaults to `http://localhost:8000`.
 
+### OpenAI provider environment variables
+
+OpenAI configuration follows an `AGENTHUB_`-first policy with optional backward-compatible fallbacks:
+
+- `AGENTHUB_OPENAI_API_KEY` (preferred)
+  - Fallback: `OPENAI_API_KEY`
+- `AGENTHUB_OPENAI_BASE_URL` (preferred, defaults to `https://api.openai.com/v1`)
+  - Fallback: `OPENAI_BASE_URL`
+- `AGENTHUB_OPENAI_TIMEOUT_SECONDS` (preferred, defaults to `30.0`)
+  - Fallback: `OPENAI_TIMEOUT_SECONDS`
+
 ## Supported task types (current milestone)
 
 - List files in a directory (`filesystem:list_directory`)

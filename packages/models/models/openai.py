@@ -27,9 +27,13 @@ class _HttpResult:
 
 class OpenAIAdapter(ProviderAdapter):
     def __init__(self) -> None:
-        self._api_key = os.getenv("OPENAI_API_KEY", "")
-        self._base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-        timeout_env = os.getenv("OPENAI_TIMEOUT_SECONDS")
+        self._api_key = _resolve_openai_api_key()
+        self._base_url = (
+            os.getenv("AGENTHUB_OPENAI_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or "https://api.openai.com/v1"
+        ).rstrip("/")
+        timeout_env = os.getenv("AGENTHUB_OPENAI_TIMEOUT_SECONDS") or os.getenv("OPENAI_TIMEOUT_SECONDS")
         self._timeout = float(timeout_env) if timeout_env else 30.0
 
     @property
@@ -54,7 +58,7 @@ class OpenAIAdapter(ProviderAdapter):
             return ProviderHealthCheck(
                 provider=self.provider_name,
                 healthy=False,
-                message="OPENAI_API_KEY is not configured",
+                message="AGENTHUB_OPENAI_API_KEY is not configured",
             )
 
         result = self._request_json("GET", "/models")
@@ -215,3 +219,7 @@ class OpenAIAdapter(ProviderAdapter):
 
     def _int_or_none(self, value: object) -> int | None:
         return value if isinstance(value, int) else None
+
+
+def _resolve_openai_api_key() -> str:
+    return os.getenv("AGENTHUB_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
