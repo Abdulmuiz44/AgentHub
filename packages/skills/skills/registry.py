@@ -3,6 +3,8 @@ from pathlib import Path
 from .base import Skill, SkillManifest
 from .fetch import FetchSkill
 from .filesystem import FilesystemConfig, FilesystemSkill
+from .search_provider import SearchProviderResolver, SearchProviderResolverConfig
+from .web_search import WebSearchSkill
 
 
 class SkillRegistry:
@@ -16,7 +18,21 @@ class SkillRegistry:
         return self._skills.get(skill_name)
 
     @classmethod
-    def default(cls, workspace_root: str | Path = ".") -> "SkillRegistry":
+    def default(
+        cls,
+        workspace_root: str | Path = ".",
+        *,
+        search_provider: str | None = None,
+        searxng_base_url: str | None = None,
+    ) -> "SkillRegistry":
         fs_skill = FilesystemSkill(FilesystemConfig(workspace_root=workspace_root))
         fetch_skill = FetchSkill()
-        return cls({"filesystem": fs_skill, "fetch": fetch_skill})
+        web_search_skill = WebSearchSkill(
+            resolver=SearchProviderResolver(
+                SearchProviderResolverConfig(
+                    explicit_provider=search_provider,
+                    searxng_base_url=searxng_base_url,
+                )
+            )
+        )
+        return cls({"filesystem": fs_skill, "fetch": fetch_skill, "web_search": web_search_skill})
