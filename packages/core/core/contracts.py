@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -32,6 +32,7 @@ class AgentRequest(BaseModel):
     provider: str = "builtin"
     model: str = "deterministic"
     enabled_skills: list[str] = Field(default_factory=list)
+    available_skills: list[str] = Field(default_factory=list)
 
 
 class RunContext(BaseModel):
@@ -45,6 +46,7 @@ class PlanStep(BaseModel):
     title: str
     skill_name: str | None = None
     skill_input: dict[str, Any] = Field(default_factory=dict)
+    selection_reason: str | None = None
 
 
 class EvidenceItem(BaseModel):

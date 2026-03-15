@@ -22,19 +22,20 @@
 - Avoid speculative abstractions and advanced product surface.
 
 ## Runtime slice (current alpha)
-- `POST /runs` persists a queued run and returns immediately.
-- The API starts a bounded in-process worker for local async execution.
-- Run lifecycle now includes `pending`, `queued`, `running`, `waiting_for_approval`, `completed`, `failed`, and `cancelled`.
-- Runs persist compact execution checkpoints (`plan`, current step index, step results, evidence summary, pending approval refs).
-- Approval-required steps create approval records, pause the run, and resume after approval grant.
-- Approval denial fails the run with clear trace output.
-- `POST /runs/{id}/cancel` cancels queued/waiting runs immediately and requests cooperative cancellation for running runs.
-- `GET /runs/{id}/stream` streams live trace/status updates for the run detail page.
+- Runs persist through SQLite-backed sessions, runs, traces, approvals, providers, and skill definitions.
+- Planner routing remains deterministic and now supports explicit `Use skill <name>` routing for installed local skills.
+- Runtime executes native Python skills and MCP stdio-backed skills through one shared execution contract.
+- Skills are represented through a real local catalog with runtime type, manifest metadata, install source, and last test status.
+- MCP support is bounded to local stdio tool wrapping (`initialize`, `tools/list`, `tools/call`, clean shutdown).
+- Skills can be installed from a local manifest, enabled or disabled, and tested through API and UI.
 
 ## Search configuration
 - Optional `AGENTHUB_SEARCH_PROVIDER` (`searxng`, `duckduckgo`, `duckduckgo_instant`).
 - Optional `AGENTHUB_SEARXNG_BASE_URL` for SearxNG deployment.
 - Default behavior uses SearxNG when configured, otherwise DuckDuckGo Instant API fallback.
+
+## Repo hygiene
+- Temporary validation folders such as `.deps/`, `apps/api/.vendor/`, and `*.egg-info/` are ignored and should not be committed.
 
 ## Definition of done (small tasks)
 - API starts and health route responds.

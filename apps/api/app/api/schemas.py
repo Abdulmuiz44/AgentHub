@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -96,3 +96,50 @@ class ProviderHealthCheckResponse(BaseModel):
     configuration_status: str
     healthy: bool
     message: str
+
+
+class SkillManifestPayload(BaseModel):
+    name: str
+    version: str = "0.1.0"
+    description: str
+    runtime_type: str
+    scopes: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    enabled_by_default: bool = True
+    input_schema_summary: dict[str, Any] = Field(default_factory=dict)
+    output_schema_summary: dict[str, Any] = Field(default_factory=dict)
+    capabilities: list[dict[str, Any]] = Field(default_factory=list)
+    mcp_stdio: dict[str, Any] | None = None
+    install_source: str | None = None
+    test_input: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillResponse(BaseModel):
+    id: int | None = None
+    name: str
+    version: str
+    description: str
+    runtime_type: str
+    enabled: bool
+    is_builtin: bool
+    scopes: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    install_source: str | None = None
+    last_test_status: str | None = None
+    last_test_summary: str | None = None
+    last_tested_at: datetime | None = None
+    manifest: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillInstallRequest(BaseModel):
+    manifest: SkillManifestPayload | None = None
+    manifest_path: str | None = None
+
+
+class SkillTestResponse(BaseModel):
+    skill: SkillResponse
+    status: str
+    summary: str
+    checked_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)

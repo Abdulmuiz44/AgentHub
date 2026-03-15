@@ -1,13 +1,13 @@
-import json
+﻿import json
+import shutil
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app.main import app
-from core.contracts import AgentRequest
+from core.contracts import AgentRequest, EvidenceBundle, RunContext
 from core.executor import Executor
 from core.planner import Planner
-from core.contracts import EvidenceBundle, RunContext
 from core.synthesis import SynthesisEngine
 from core.tracing import TraceCollector
 from skills.base import SkillRequest
@@ -47,18 +47,18 @@ def test_planner_heuristics_url_file_and_research() -> None:
     assert plan_fs[0].skill_name == "filesystem"
     assert plan_fs[0].skill_input["operation"] == "read_text_file"
 
-    plan_research = planner.create_plan(
-        AgentRequest(task="Research and compare python and golang web frameworks", enabled_skills=["web_search", "fetch"])
-    )
+    plan_research = planner.create_plan(AgentRequest(task="Research and compare python and golang web frameworks", enabled_skills=["web_search", "fetch"]))
     assert len(plan_research) >= 2
     assert plan_research[0].skill_name == "web_search"
     assert plan_research[1].skill_name == "fetch"
     assert plan_research[1].skill_input["from_search"] is True
 
 
-def test_filesystem_guardrails(tmp_path: Path) -> None:
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
+def test_filesystem_guardrails() -> None:
+    workspace = Path(".tmp/test-filesystem-guardrails")
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    workspace.mkdir(parents=True)
     (workspace / "notes.txt").write_text("hello", encoding="utf-8")
     skill = FilesystemSkill(FilesystemConfig(workspace_root=workspace, max_file_size_bytes=10))
 
@@ -141,16 +141,9 @@ def test_executor_multi_step_search_fetch(monkeypatch) -> None:
     monkeypatch.setattr("skills.fetch.urlopen", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr("skills.fetch.socket.getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("93.184.216.34", 0))])
 
-    registry = SkillRegistry(
-        {
-            "web_search": WebSearchSkill(resolver=StubSearchResolver()),
-            "fetch": FakeFetchSkill(),
-        }
-    )
+    registry = SkillRegistry({"web_search": WebSearchSkill(resolver=StubSearchResolver()), "fetch": FakeFetchSkill()})
     executor = Executor(registry)
-    steps = Planner().create_plan(
-        AgentRequest(task="Research compare tools", enabled_skills=["web_search", "fetch"])
-    )
+    steps = Planner().create_plan(AgentRequest(task="Research compare tools", enabled_skills=["web_search", "fetch"]))
     result = executor.execute(context=RunContext(run_id=1), steps=steps, trace_collector=TraceCollector())
     assert result.status.value == "completed"
     assert result.execution_summary["evidence_items"] >= 2

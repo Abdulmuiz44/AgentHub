@@ -2,13 +2,12 @@
 
 AgentHub is a local-first, cloud-optional platform for running AI agents.
 
-This repository now includes an asynchronous deterministic runtime slice:
-- FastAPI backend with SQLite-backed sessions, runs, traces, and approvals
-- In-process worker queue for bounded local async execution
-- Persisted resumable execution checkpoints for queued, running, and approval-paused runs
-- Built-in executable skills: read-only filesystem, HTTP fetch, and web search
-- Deterministic research workflow: `web_search -> fetch -> evidence aggregation -> synthesis`
-- SSE run progress streaming plus dashboard and live run detail UI with approval/cancel controls
+This repository currently includes:
+- FastAPI backend with SQLite-backed sessions, runs, traces, approvals, provider metadata, and a persisted skill catalog
+- Deterministic bounded execution with built-in native skills for filesystem, fetch, and web search
+- Local installable skill management for native and MCP stdio-backed skills
+- Lightweight MCP stdio wrapping for initialize, tools discovery, tool calls, and clean shutdown
+- Next.js dashboard, run detail page, and a simple skills management view
 
 ## Repository layout
 
@@ -44,58 +43,64 @@ npm run dev
 
 The dashboard uses `NEXT_PUBLIC_API_BASE` or defaults to `http://localhost:8000`.
 
-## Async runtime lifecycle
+## Skill platform
 
-Run statuses for this milestone:
-- `pending`
-- `queued`
-- `running`
-- `waiting_for_approval`
-- `completed`
-- `failed`
-- `cancelled`
+AgentHub now has a real local skill catalog with two runtime types:
+- `native_python`
+- `mcp_stdio`
 
-Key behavior:
-- `POST /runs` returns quickly with a queued run and run id.
-- The API process starts a small in-process worker on startup.
-- Runs persist compact execution checkpoints (`plan`, `current_step_index`, `step_results`, `evidence`, pending approval refs).
-- Approval-required steps pause execution, persist state, and resume after approval.
-- `POST /runs/{id}/cancel` cancels queued/waiting runs immediately and requests cooperative cancellation for running runs.
-- `GET /runs/{id}/stream` exposes an SSE feed of trace/status updates for the run detail page.
+Catalog capabilities in this milestone:
+- `GET /skills`
+- `GET /skills/{name}`
+- `POST /skills/install`
+- `POST /skills/{name}/enable`
+- `POST /skills/{name}/disable`
+- `POST /skills/{name}/test`
+
+Skill manifests include typed metadata such as:
+- `name`, `version`, `description`
+- `runtime_type`
+- `scopes`, `tags`, `permissions`
+- `input_schema_summary`, `output_schema_summary`
+- `capabilities`
+- `mcp_stdio` command/config for stdio-backed skills
+
+Built-in skills are seeded into the same SQLite-backed catalog as installed local skills so the UI and API can inspect them consistently.
+
+## MCP stdio support
+
+This milestone adds bounded MCP stdio support for local tool wrapping only:
+- start a configured stdio server process
+- send `initialize`
+- call `tools/list`
+- call `tools/call`
+- normalize tool results into the shared AgentHub skill contract
+- shut down cleanly
+
+Current MCP scope limits:
+- stdio only
+- tool execution only
+- no MCP resources/prompts UI yet
+- no remote registry or hosted skill distribution
+
+## Explicit installed-skill routing
+
+The planner remains deterministic. It does not do model-driven tool selection.
+
+Installed skills can be exercised explicitly by naming them in the task, for example:
+- `Use skill echo_mcp_test to summarize this input`
+
+When that pattern is used, the plan records an explicit selection reason and traces include the selected skill, runtime type, and whether it was built-in or installed.
 
 ## Search configuration
 
-- `AGENTHUB_SEARCH_PROVIDER` (optional): `searxng`, `duckduckgo`, or `duckduckgo_instant`.
-- `AGENTHUB_SEARXNG_BASE_URL` (optional): required when provider is `searxng`.
-
-Default behavior:
-- if `AGENTHUB_SEARXNG_BASE_URL` is set, use SearxNG
-- otherwise use DuckDuckGo Instant Answer API fallback
-
-## OpenAI provider environment variables
-
-OpenAI configuration follows an `AGENTHUB_`-first policy with optional backward-compatible fallbacks:
-
-- `AGENTHUB_OPENAI_API_KEY` (preferred)
-  - Fallback: `OPENAI_API_KEY`
-- `AGENTHUB_OPENAI_BASE_URL` (preferred, defaults to `https://api.openai.com/v1`)
-  - Fallback: `OPENAI_BASE_URL`
-- `AGENTHUB_OPENAI_TIMEOUT_SECONDS` (preferred, defaults to `30.0`)
-  - Fallback: `OPENAI_TIMEOUT_SECONDS`
-
-## Supported task types (current milestone)
-
-- List files in a directory (`filesystem:list_directory`)
-- Read a local UTF-8 file (`filesystem:read_text_file`)
-- Fetch and read text from HTTP/HTTPS URLs (`fetch:fetch_url`)
-- Research/find/compare/look-up tasks (`web_search` + bounded `fetch`)
-- Approval-paused execution for risky steps that declare non-read-only capabilities
+- `AGENTHUB_SEARCH_PROVIDER` (optional): `searxng`, `duckduckgo`, or `duckduckgo_instant`
+- `AGENTHUB_SEARXNG_BASE_URL` (optional): required when provider is `searxng`
 
 ## Current limits
 
-- Deterministic, heuristic planner only (no provider tool routing)
-- Single-process in-memory worker only; no external queue or distributed execution
-- Resume is checkpoint-based and can replay the current step after a process crash if it was interrupted mid-step
-- Search/fetch are bounded by max result counts, fetch limits, timeout, and content-size caps
-- Trace payloads store compact summaries/previews instead of full document bodies
-- No browser/shell/voice/OCR/multi-agent orchestration
+- Local skill install only; no remote marketplace or publishing flow
+- Built-in deterministic runtime remains synchronous in the current repository state
+- MCP support is intentionally narrow and focused on stdio tool calls
+- No model-driven routing, distributed workers, browser marketplace UX, or hosted sync
+- Temp validation folders such as `.deps/` and `apps/api/.vendor/` are ignored and should not be committed

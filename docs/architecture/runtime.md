@@ -1,62 +1,70 @@
-﻿# Runtime Architecture (Asynchronous Deterministic Local Worker Slice)
+﻿# Runtime Architecture (Deterministic Local Skill Platform Slice)
 
 ## Components
-- **API (`apps/api`)**: creates runs, exposes lifecycle routes, approval decisions, cancellation, trace retrieval, and SSE progress streaming.
-- **Worker (`apps/api/app/services/worker.py`)**: bounded in-process queue consumer that executes one run at a time by default.
-- **Runtime (`apps/api/app/services/runtime.py`)**: planner + executor + approval + synthesis orchestration with persisted checkpoints.
-- **Core (`packages/core`)**: deterministic planner, resumable bounded executor, evidence aggregation, synthesis engine, runtime contracts.
-- **Memory (`packages/memory`)**: SQLModel entities and SQLite repositories for sessions, runs, traces, and approvals.
-- **Skills (`packages/skills`)**: executable skill interfaces and built-in `filesystem`, `fetch`, and `web_search` skills.
-- **Web (`apps/web`)**: dashboard and live run detail UI showing status, checkpoint state, approvals, cancellation, and ordered trace events.
+- **API (`apps/api`)**: creates runs, exposes run/trace routes, and exposes typed skill catalog/install/enable/disable/test routes.
+- **Core (`packages/core`)**: deterministic planner, bounded executor, evidence aggregation, synthesis engine, and runtime contracts.
+- **Skill catalog service (`apps/api/app/services/skills.py`)**: seeds built-ins, persists local skill definitions, loads manifests, tests skills, and builds runtime registries.
+- **Memory (`packages/memory`)**: SQLModel entities and SQLite repositories for sessions, runs, traces, approvals, providers, and skill definitions.
+- **Skills (`packages/skills`)**: shared manifest spec, native built-in skills, MCP stdio wrapper, and unified skill registry.
+- **Web (`apps/web`)**: dashboard, run detail UI, and a practical skills management page.
 
-## Runtime flow
-1. Client calls `POST /runs`.
-2. API persists a queued run, stores provider/model/requested skills, emits `run.queued`, and submits the run id to the in-process worker.
-3. Worker picks up the run, loads or reconstructs the persisted checkpoint, transitions the run to `running`, and emits `run.started` or `run.resumed`.
-4. Runtime creates a deterministic plan once, persists it into `execution_state`, and emits `plan.created`.
-5. Executor processes plan steps in order, persisting progress after each step and emitting tool lifecycle events:
-   - `tool.requested`
-   - `tool.started`
-   - `tool.completed` or `tool.failed`
-6. If a step requires approval, runtime creates an approval record, persists the checkpoint, sets the run to `waiting_for_approval`, and emits:
-   - `approval.requested`
-   - `run.paused`
-7. Approval resolution is persisted through `POST /approvals/{id}/decision`:
-   - approval grant => run re-queued and later resumed from the checkpoint
-   - approval denial => run failed immediately with `approval.resolved` and `run.failed`
-8. Before each safe boundary the runtime checks for cancel requests:
-   - queued/waiting runs cancel immediately
-   - running runs cancel cooperatively before the next step or synthesis boundary
-9. After steps finish, runtime emits `synthesis.started`, performs provider-backed synthesis or deterministic fallback, emits `synthesis.completed`, and then emits `run.completed` or `run.failed`.
-10. `GET /runs/{id}/stream` polls persisted traces/status and sends compact SSE updates to the run detail page.
+## Skill platform flow
+1. Built-in native skills are defined in code with typed manifests.
+2. On demand, the skill catalog service seeds built-ins into SQLite-backed `SkillDefinition` records.
+3. Local manifests can be installed through `POST /skills/install` or loaded from a manifest path.
+4. Skill definitions persist runtime type, enabled state, manifest/config, tags/scopes, install source, and last test result.
+5. The catalog service builds a runtime `SkillRegistry` from enabled skill definitions.
+6. Planner behavior stays deterministic:
+   - normal built-in heuristics for file/url/research tasks
+   - explicit routing for `Use skill <name> ...`
+7. Executor invokes both native and MCP stdio skills through the same request/result contract.
+8. Trace events include compact runtime metadata such as skill name, runtime type, built-in vs installed, and result summaries.
 
-## Persisted checkpoint shape
-`run.execution_state` stores compact resumable data:
-- `plan`
-- `current_step_index`
-- `step_results`
-- `evidence`
-- `working_search_results`
-- `pending_approval_id`
-- `pending_approval_step_id`
-- `pending_approval_reason`
-- `synthesis`
-- `failure_context`
-- `change_summary`
+## Runtime types
+Supported in this milestone:
+- `native_python`
+- `mcp_stdio`
 
-This avoids duplicating full raw tool outputs while keeping enough state to resume and debug execution.
+Reserved for future expansion:
+- `mcp_http`
+- `subprocess_tool`
 
-## Guardrails and bounds
-- **Worker**: single-process, bounded concurrency, clean startup/shutdown from the FastAPI lifespan.
-- **Filesystem**: workspace-root restriction, traversal prevention, max file size, UTF-8 text default.
-- **Fetch**: HTTP/HTTPS only, timeout, response size cap, local/private target rejection.
-- **Web search**: query validation, max result cap, timeout, URL normalization/deduplication, invalid/local target rejection.
-- **Evidence/traces**: compact summaries only, no giant page-body dumps or secret streaming.
-- **Cancellation**: cooperative only, no force-killing subprocess trees.
+## Manifest shape
+The shared manifest spec includes:
+- `name`, `version`, `description`
+- `runtime_type`
+- `scopes`, `permissions`, `tags`
+- `enabled_by_default`
+- `input_schema_summary`, `output_schema_summary`
+- `capabilities`
+- `install_source`
+- `test_input`
+- `mcp_stdio` config for stdio-backed skills:
+  - `command`
+  - `args`
+  - `env_var_refs`
+  - `working_directory`
+  - `startup_timeout_seconds`
+  - `call_timeout_seconds`
+  - `tool_name`
+
+## MCP stdio wrapper behavior
+The local MCP stdio wrapper intentionally stays small:
+- launches a configured stdio process
+- sends `initialize`
+- discovers tools via `tools/list`
+- invokes a selected tool via `tools/call`
+- normalizes the response into the shared AgentHub `SkillResult`
+- shuts down cleanly with `shutdown` and `exit`
+
+Current limits:
+- stdio only
+- tool invocation only
+- no MCP resources/prompts workflow
+- one process per execution/test call
 
 ## Current limitations
-- No external queue, distributed worker pool, or multi-process coordination.
-- Mid-step crash recovery is checkpoint-based and may replay the in-flight step after restart.
-- The planner remains deterministic and heuristic-driven; models still do not choose tools.
-- Approval flow is wired for steps that declare risky/non-read-only capabilities; built-in default skills remain read-only.
-- SSE currently polls persisted traces/status rather than pushing from a dedicated pub/sub bus.
+- The current repository runtime still executes runs synchronously in-request.
+- Skill installation is local-manifest only.
+- Native built-ins are still the only heuristically selected skills unless the task explicitly names an installed skill.
+- Trace payloads remain compact and do not store full raw MCP protocol exchanges.

@@ -1,8 +1,12 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+.deps/
+*.egg-info/
+apps/api/.vendor/
+.tmp/
 
 # Node
 node_modules/

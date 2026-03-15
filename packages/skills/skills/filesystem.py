@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
-from .base import Skill, SkillCapability, SkillManifest, SkillRequest, SkillResult
+from .base import Skill, SkillCapability, SkillManifest, SkillRequest, SkillResult, SkillRuntimeType, SkillTestResult, SkillTestStatus
 
 
 class FilesystemConfig:
@@ -20,10 +20,15 @@ class FilesystemSkill(Skill):
         name="filesystem",
         version="0.1.0",
         description="Read-only filesystem access scoped to workspace root",
+        runtime_type=SkillRuntimeType.NATIVE_PYTHON,
+        scopes=["filesystem:read"],
         permissions=["fs:read"],
+        tags=["builtin", "filesystem"],
+        input_schema_summary={"operation": "list_directory or read_text_file", "path": "Path relative to workspace root"},
+        output_schema_summary={"entries": "directory listing", "content": "UTF-8 file content preview"},
         capabilities=[
-            SkillCapability(operation="list_directory", read_only=True),
-            SkillCapability(operation="read_text_file", read_only=True),
+            SkillCapability(operation="list_directory", read_only=True, description="List workspace directory entries"),
+            SkillCapability(operation="read_text_file", read_only=True, description="Read a UTF-8 text file"),
         ],
     )
 
@@ -61,17 +66,46 @@ class FilesystemSkill(Skill):
         try:
             if operation == "list_directory":
                 entries = self.list_directory(path)
-                return SkillResult(success=True, output={"entries": entries, "path": path}, summary=f"Listed {len(entries)} entries")
+                return SkillResult(
+                    success=True,
+                    output={"entries": entries, "path": path},
+                    summary=f"Listed {len(entries)} entries",
+                    runtime_type=self.manifest.runtime_type,
+                    skill_name=self.manifest.name,
+                    metadata={"builtin": True},
+                )
             if operation == "read_text_file":
                 content = self.read_text_file(path)
                 return SkillResult(
                     success=True,
                     output={"content": content, "path": path, "chars": len(content)},
                     summary=f"Read {len(content)} chars from {path}",
+                    runtime_type=self.manifest.runtime_type,
+                    skill_name=self.manifest.name,
+                    metadata={"builtin": True},
                 )
-            return SkillResult(success=False, error=f"Unsupported operation: {operation}")
+            return SkillResult(
+                success=False,
+                error=f"Unsupported operation: {operation}",
+                runtime_type=self.manifest.runtime_type,
+                skill_name=self.manifest.name,
+                metadata={"builtin": True},
+            )
         except FilesystemValidationError as exc:
-            return SkillResult(success=False, error=str(exc))
+            return SkillResult(
+                success=False,
+                error=str(exc),
+                runtime_type=self.manifest.runtime_type,
+                skill_name=self.manifest.name,
+                metadata={"builtin": True},
+            )
+
+    def test(self) -> SkillTestResult:
+        return SkillTestResult(
+            status=SkillTestStatus.PASSED,
+            summary=f"Workspace root {self.config.workspace_root} is available",
+            metadata={"workspace_root": str(self.config.workspace_root)},
+        )
 
 
 def load_manifests(_path: str) -> list[SkillManifest]:

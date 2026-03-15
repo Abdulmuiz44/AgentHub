@@ -10,5 +10,5 @@ Ship a minimal local-first platform foundation with one deterministic runtime, o
 4. Next.js dashboard shell wired to `POST /runs` with clear run feedback.
 5. Completed: synchronous alpha execution loop with deterministic planning, executable filesystem/fetch skills, trace-rich run completion, and dashboard run result panel.
 6. Completed: deterministic research workflow with `web_search`, bounded search->fetch execution, evidence aggregation, and improved synthesis/trace visibility.
-7. Completed: async local orchestration with queued runs, in-process worker execution, approval-aware pause/resume, cancellation, SSE progress updates, and live run detail controls.
-8. Next: harden worker isolation and step-level recovery semantics before considering external queue backends or richer mutating skills.
+7. Completed: local installable skill catalog with runtime-typed manifests, SQLite-backed skill persistence, MCP stdio wrapping, enable/disable/test flows, and a skills management UI.
+8. Next: upgrade the run lifecycle to true asynchronous pause/resume orchestration so installed skills can participate in longer-lived approval-aware workflows.

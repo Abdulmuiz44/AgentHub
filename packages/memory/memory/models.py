@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 from typing import Any
 
 from sqlalchemy import Column
@@ -46,9 +46,21 @@ class ApprovalRequest(SQLModel, table=True):
 
 class SkillDefinition(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    name: str
+    name: str = Field(index=True, unique=True)
     version: str = "0.1.0"
+    description: str = ""
+    runtime_type: str = "native_python"
     enabled: bool = True
+    is_builtin: bool = False
+    scopes: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    manifest_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    install_source: str | None = None
+    last_test_status: str | None = None
+    last_test_summary: str | None = None
+    last_tested_at: datetime | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ProviderConfig(SQLModel, table=True):

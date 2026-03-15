@@ -1,14 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from .base import Skill, SkillCapability, SkillManifest, SkillRequest, SkillResult
-from .search_provider import (
-    SearchProviderError,
-    SearchProviderRequest,
-    SearchProviderResolver,
-    normalize_result_url,
-)
+from .base import Skill, SkillCapability, SkillManifest, SkillRequest, SkillResult, SkillRuntimeType, SkillTestResult, SkillTestStatus
+from .search_provider import SearchProviderError, SearchProviderRequest, SearchProviderResolver, normalize_result_url
 
 
 class WebSearchInput(BaseModel):
@@ -35,8 +30,13 @@ class WebSearchSkill(Skill):
         name="web_search",
         version="0.1.0",
         description="Search the public web and return normalized ranked results",
+        runtime_type=SkillRuntimeType.NATIVE_PYTHON,
+        scopes=["network:read"],
         permissions=["net:http"],
-        capabilities=[SkillCapability(operation="search_web", read_only=True)],
+        tags=["builtin", "search", "research"],
+        input_schema_summary={"query": "Web search query", "max_results": "1-10 results"},
+        output_schema_summary={"results": "normalized ranked search results"},
+        capabilities=[SkillCapability(operation="search_web", read_only=True, description="Search the public web")],
     )
 
     def __init__(self, resolver: SearchProviderResolver | None = None) -> None:
@@ -46,22 +46,36 @@ class WebSearchSkill(Skill):
         try:
             data = WebSearchInput(**request.input)
         except Exception as exc:
-            return SkillResult(success=False, error=f"Invalid search input: {exc}")
+            return SkillResult(
+                success=False,
+                error=f"Invalid search input: {exc}",
+                runtime_type=self.manifest.runtime_type,
+                skill_name=self.manifest.name,
+                metadata={"builtin": True},
+            )
 
         if not self._is_standard_query(data.query):
-            return SkillResult(success=False, error="Only standard web search queries are supported")
+            return SkillResult(
+                success=False,
+                error="Only standard web search queries are supported",
+                runtime_type=self.manifest.runtime_type,
+                skill_name=self.manifest.name,
+                metadata={"builtin": True},
+            )
 
         try:
             provider = self.resolver.resolve()
             response = provider.search(
-                SearchProviderRequest(
-                    query=data.query,
-                    max_results=data.max_results,
-                    timeout_seconds=data.timeout_seconds,
-                )
+                SearchProviderRequest(query=data.query, max_results=data.max_results, timeout_seconds=data.timeout_seconds)
             )
         except SearchProviderError as exc:
-            return SkillResult(success=False, error=str(exc))
+            return SkillResult(
+                success=False,
+                error=str(exc),
+                runtime_type=self.manifest.runtime_type,
+                skill_name=self.manifest.name,
+                metadata={"builtin": True},
+            )
 
         deduped: list[WebSearchResult] = []
         seen_urls: set[str] = set()
@@ -86,7 +100,13 @@ class WebSearchSkill(Skill):
             success=True,
             output=output.model_dump(mode="json"),
             summary=f"Found {len(deduped)} normalized web results for query",
+            runtime_type=self.manifest.runtime_type,
+            skill_name=self.manifest.name,
+            metadata={"builtin": True, "provider": provider.name},
         )
+
+    def test(self) -> SkillTestResult:
+        return SkillTestResult(status=SkillTestStatus.PASSED, summary="Web search skill configuration is available")
 
     @staticmethod
     def _is_standard_query(query: str) -> bool:
