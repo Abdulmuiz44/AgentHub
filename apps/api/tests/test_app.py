@@ -73,4 +73,4 @@ def test_sessions_runs_and_catalog_flow() -> None:
         skills = client.get("/skills")
         assert skills.status_code == 200
         skill_names = {item["name"] for item in skills.json()}
-        assert {"filesystem", "fetch"}.issubset(skill_names)
+        assert {"filesystem", "fetch", "web_search"}.issubset(skill_names)

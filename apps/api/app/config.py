@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = Field(default="sqlite:///./agenthub.db")
     workspace_root: str = Field(default=".")
+    search_provider: str | None = Field(default=None)
+    searxng_base_url: str | None = Field(default=None)
 
 
 settings = Settings()

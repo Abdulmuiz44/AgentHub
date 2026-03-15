@@ -24,7 +24,7 @@ export default function DashboardPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<CreateRunResult | null>(null);
-  const enabledSkills = useMemo(() => ["filesystem", "fetch"], []);
+  const enabledSkills = useMemo(() => ["filesystem", "fetch", "web_search"], []);
 
   useEffect(() => {
     let active = true;
@@ -146,7 +146,7 @@ export default function DashboardPage() {
             className="w-full rounded bg-slate-900 p-2"
             value={task}
             onChange={(e) => setTask(e.target.value)}
-            placeholder="Describe the task"
+            placeholder="Describe the task (e.g., Compare Python and Go web frameworks for API performance)"
             required
           />
         </div>
@@ -210,6 +210,7 @@ export default function DashboardPage() {
           <p className="text-sm">Status: {runResult.run.status}</p>
           <p className="text-sm">Synthesis mode: {runResult.run.synthesis_mode ?? "n/a"}</p>
           <p className="text-sm">Synthesis status: {runResult.run.synthesis_status ?? "n/a"}</p>
+          <p className="text-sm">Evidence summary: {JSON.stringify(runResult.run.evidence_summary ?? {})}</p>
           <p className="text-sm whitespace-pre-wrap">Final output: {runResult.run.final_output ?? "(none)"}</p>
           <p className="text-sm">
             <Link href={`/runs/${runResult.run.id}`} className="text-blue-400 underline hover:text-blue-300">
