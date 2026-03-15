@@ -53,11 +53,18 @@ def test_sessions_runs_and_catalog_flow() -> None:
         assert provider_models.status_code == 200
         provider_models_payload = provider_models.json()
         assert "providers" in provider_models_payload
-        assert any(item["provider_name"] == "ollama" for item in provider_models_payload["providers"])
+        ollama_models = next(item for item in provider_models_payload["providers"] if item["provider_name"] == "ollama")
+        assert "configuration_status" in ollama_models
+        assert "is_configured" in ollama_models
+        assert "models" in ollama_models
+        assert "message" in ollama_models
 
         ollama_health = client.post("/providers/health-check", json={"provider": "ollama"})
         assert ollama_health.status_code == 200
-        assert ollama_health.json()["healthy"] is True
+        ollama_health_payload = ollama_health.json()
+        assert "configuration_status" in ollama_health_payload
+        assert isinstance(ollama_health_payload["healthy"], bool)
+        assert isinstance(ollama_health_payload["message"], str)
 
         unknown_provider_health = client.post("/providers/health-check", json={"provider": "missing"})
         assert unknown_provider_health.status_code == 404
