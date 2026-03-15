@@ -12,4 +12,9 @@ def add_trace_event(db: DBSession, run_id: int, event_type: str, payload: str = 
 
 
 def list_trace_events(db: DBSession, run_id: int) -> list[TraceEventRecord]:
-    return db.exec(select(TraceEventRecord).where(TraceEventRecord.run_id == run_id)).all()
+    statement = (
+        select(TraceEventRecord)
+        .where(TraceEventRecord.run_id == run_id)
+        .order_by(TraceEventRecord.id)
+    )
+    return db.exec(statement).all()

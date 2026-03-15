@@ -18,8 +18,20 @@ class SkillManifest(BaseModel):
     capabilities: list[SkillCapability] = Field(default_factory=list)
 
 
+class SkillRequest(BaseModel):
+    operation: str | None = None
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillResult(BaseModel):
+    success: bool
+    output: dict[str, Any] = Field(default_factory=dict)
+    summary: str = ""
+    error: str | None = None
+
+
 class Skill(ABC):
     manifest: SkillManifest
 
     @abstractmethod
-    def execute(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+    def execute(self, request: SkillRequest) -> SkillResult: ...

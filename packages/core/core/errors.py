@@ -12,3 +12,11 @@ class SkillNotFoundError(AgentHubError):
 
 class InvalidRunRequestError(AgentHubError):
     """Raised when a run request payload fails domain validation."""
+
+
+class PlanningError(AgentHubError):
+    """Raised when planning fails."""
+
+
+class ExecutionError(AgentHubError):
+    """Raised when execution fails."""
