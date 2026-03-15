@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .contracts import PlanStep, StepExecutionResult, SynthesisMetadata
+from models.base import ProviderGenerationRequest, ProviderMessage
 from models.registry import ProviderRegistry
 
 
@@ -43,7 +44,19 @@ class SynthesisEngine:
 
         try:
             prompt = self._build_prompt(task=task, plan=plan, step_results=step_results, execution_summary=execution_summary)
-            output = adapter.generate(prompt=prompt, model=model)
+            response = adapter.generate(
+                ProviderGenerationRequest(
+                    model=model,
+                    messages=[ProviderMessage(role="user", content=prompt)],
+                )
+            )
+            if response.error:
+                raise RuntimeError(f"{response.error.code}: {response.error.message}")
+
+            output = response.output_text
+            if not output:
+                raise RuntimeError("Provider response did not include output_text")
+
             metadata = SynthesisMetadata(mode="provider", status="completed", provider=provider, model=model)
             return output, metadata
         except Exception as exc:

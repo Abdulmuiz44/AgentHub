@@ -46,18 +46,26 @@ def list_provider_models(provider: str | None = Query(default=None)) -> Provider
     else:
         entries = registry.list_entries()
 
-    return ProviderModelsResponse(
-        providers=[
+    providers: list[ProviderModelsItemResponse] = []
+    for entry in entries:
+        models = entry.capability.models
+        adapter = registry.get(entry.capability.name)
+        if adapter is not None:
+            listed_models = adapter.list_models()
+            if listed_models:
+                models = listed_models
+
+        providers.append(
             ProviderModelsItemResponse(
                 provider_name=entry.capability.name,
                 display_name=entry.capability.display_name,
                 configuration_status=entry.configuration_status.value,
                 is_configured=entry.is_configured,
-                models=entry.capability.models,
+                models=models,
             )
-            for entry in entries
-        ]
-    )
+        )
+
+    return ProviderModelsResponse(providers=providers)
 
 
 @router.post("/providers/health-check", response_model=ProviderHealthCheckResponse)
@@ -82,9 +90,10 @@ def health_check_provider(payload: ProviderHealthCheckRequest) -> ProviderHealth
             message="Provider is unavailable",
         )
 
+    health = adapter.health_check()
     return ProviderHealthCheckResponse(
         provider=payload.provider,
         configuration_status=provider.configuration_status.value,
-        healthy=True,
-        message="Provider is healthy",
+        healthy=health.healthy,
+        message=health.message or ("Provider is healthy" if health.healthy else "Provider health check failed"),
     )

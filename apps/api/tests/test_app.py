@@ -57,7 +57,7 @@ def test_sessions_runs_and_catalog_flow() -> None:
 
         ollama_health = client.post("/providers/health-check", json={"provider": "ollama"})
         assert ollama_health.status_code == 200
-        assert ollama_health.json()["healthy"] is True
+        assert isinstance(ollama_health.json()["healthy"], bool)
 
         unknown_provider_health = client.post("/providers/health-check", json={"provider": "missing"})
         assert unknown_provider_health.status_code == 404
