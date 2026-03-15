@@ -1,4 +1,5 @@
-from datetime import datetime
+﻿from datetime import datetime
+from typing import Any
 
 from sqlmodel import Session as DBSession
 
@@ -24,6 +25,9 @@ def update_run(
     synthesis_provider: str | None = None,
     synthesis_model: str | None = None,
     synthesis_error: str | None = None,
+    synthesis_error_summary: str | None = None,
+    execution_summary: dict[str, Any] | None = None,
+    evidence_summary: dict[str, Any] | None = None,
 ) -> Run:
     run.status = status
     run.final_output = final_output
@@ -32,6 +36,9 @@ def update_run(
     run.synthesis_provider = synthesis_provider
     run.synthesis_model = synthesis_model
     run.synthesis_error = synthesis_error
+    run.synthesis_error_summary = synthesis_error_summary
+    run.execution_summary = execution_summary or {}
+    run.evidence_summary = evidence_summary or {}
     run.updated_at = datetime.utcnow()
     db.add(run)
     db.commit()

@@ -49,10 +49,31 @@ def test_sessions_runs_and_catalog_flow() -> None:
 
         providers = client.get("/providers")
         assert providers.status_code == 200
-        provider_names = {item["name"] for item in providers.json()}
+        provider_names = {item["provider"]["name"] for item in providers.json()}
         assert {"ollama", "openai"}.issubset(provider_names)
+
+        provider_models = client.get("/providers/models")
+        assert provider_models.status_code == 200
+        provider_models_payload = provider_models.json()
+        assert "providers" in provider_models_payload
+        ollama_models = next(item for item in provider_models_payload["providers"] if item["provider_name"] == "ollama")
+        assert "configuration_status" in ollama_models
+        assert "is_configured" in ollama_models
+        assert "models" in ollama_models
+        assert "message" in ollama_models
+
+        ollama_health = client.post("/providers/health-check", json={"provider": "ollama"})
+        assert ollama_health.status_code == 200
+        ollama_health_payload = ollama_health.json()
+        assert "configuration_status" in ollama_health_payload
+        assert isinstance(ollama_health_payload["healthy"], bool)
+        assert isinstance(ollama_health_payload["message"], str)
+
+        unknown_provider_health = client.post("/providers/health-check", json={"provider": "missing"})
+        assert unknown_provider_health.status_code == 404
+        assert unknown_provider_health.json()["detail"] == "Provider not found"
 
         skills = client.get("/skills")
         assert skills.status_code == 200
         skill_names = {item["name"] for item in skills.json()}
-        assert {"filesystem", "fetch"}.issubset(skill_names)
+        assert {"filesystem", "fetch", "web_search"}.issubset(skill_names)
