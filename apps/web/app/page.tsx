@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   CreateRunResult,
-  ProviderCapability,
+  ProviderSummary,
   checkProviderHealth,
   createRun,
   listProviderModels,
@@ -14,7 +14,7 @@ import {
 
 export default function DashboardPage() {
   const [task, setTask] = useState("");
-  const [providers, setProviders] = useState<ProviderCapability[]>([]);
+  const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [provider, setProvider] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
@@ -43,11 +43,8 @@ export default function DashboardPage() {
           return;
         }
 
-        const defaultProvider = data[0].name;
-        const defaultModels = data[0].models;
+        const defaultProvider = data[0].provider.name;
         setProvider(defaultProvider);
-        setModels(defaultModels);
-        setModel(defaultModels[0] ?? "");
       } catch (error) {
         if (!active) {
           return;
@@ -80,9 +77,9 @@ export default function DashboardPage() {
           return;
         }
 
-        setModels(providerModels);
-        setModel((prev) => (providerModels.includes(prev) ? prev : providerModels[0] ?? ""));
-        setProviderHealth(health.message ?? (health.healthy ? "Healthy" : "Unhealthy"));
+        setModels(providerModels.models);
+        setModel((prev) => (providerModels.models.includes(prev) ? prev : providerModels.models[0] ?? ""));
+        setProviderHealth(`${health.configuration_status}: ${health.message}`);
       } catch (error) {
         if (!active) {
           return;
@@ -126,6 +123,19 @@ export default function DashboardPage() {
     }
   }
 
+  const providerOptions = useMemo(
+    () =>
+      providers.map((item) => ({
+        value: item.provider.name,
+        label: `${item.provider.display_name} (${item.is_configured ? "configured" : "unconfigured"})`,
+        isConfigured: item.is_configured,
+        configurationStatus: item.configuration_status,
+      })),
+    [providers]
+  );
+
+  const selectedProvider = useMemo(() => providers.find((item) => item.provider.name === provider) ?? null, [providers, provider]);
+
   return (
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="mb-6 text-3xl font-semibold">AgentHub Dashboard</h1>
@@ -149,12 +159,17 @@ export default function DashboardPage() {
             onChange={(e) => setProvider(e.target.value)}
             disabled={isLoadingProviders || providers.length === 0}
           >
-            {providers.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.display_name}
+            {providerOptions.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
               </option>
             ))}
           </select>
+          {selectedProvider ? (
+            <p className="mt-1 text-xs text-slate-400">
+              Configuration: {selectedProvider.configuration_status} ({selectedProvider.is_configured ? "configured" : "not configured"})
+            </p>
+          ) : null}
           {providerHealth ? <p className="mt-1 text-xs text-slate-400">Provider health: {providerHealth}</p> : null}
         </div>
 
