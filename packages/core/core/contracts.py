@@ -60,6 +60,8 @@ class SynthesisMetadata(BaseModel):
     status: str
     provider: str | None = None
     model: str | None = None
+    provider_status: str | None = None
+    provider_usage_summary: str | None = None
     error_summary: str | None = None
 
 
