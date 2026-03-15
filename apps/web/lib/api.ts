@@ -41,10 +41,29 @@ export type ProviderCapability = {
   supports_streaming: boolean;
 };
 
+export type ProviderSummary = {
+  provider: ProviderCapability;
+  configuration_status: string;
+  is_configured: boolean;
+};
+
+export type ProviderModelsItem = {
+  provider_name: string;
+  display_name: string;
+  configuration_status: string;
+  is_configured: boolean;
+  models: string[];
+};
+
+export type ProviderModelsResponse = {
+  providers: ProviderModelsItem[];
+};
+
 export type ProviderHealthResponse = {
   provider: string;
+  configuration_status: string;
   healthy: boolean;
-  message?: string;
+  message: string;
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -68,7 +87,7 @@ export async function createRun(payload: CreateRunPayload): Promise<CreateRunRes
   return response.json();
 }
 
-export async function listProviders(): Promise<ProviderCapability[]> {
+export async function listProviders(): Promise<ProviderSummary[]> {
   const response = await fetch(`${API_BASE}/providers`, { cache: "no-store" });
   if (!response.ok) {
     await readError(response, "Provider list request failed");
@@ -76,34 +95,32 @@ export async function listProviders(): Promise<ProviderCapability[]> {
   return response.json();
 }
 
-export async function listProviderModels(provider: string): Promise<string[]> {
-  const providers = await listProviders();
-  const providerMatch = providers.find((item) => item.name === provider);
+export async function listProviderModels(provider: string): Promise<ProviderModelsItem> {
+  const response = await fetch(`${API_BASE}/providers/models?provider=${encodeURIComponent(provider)}`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    await readError(response, "Provider models request failed");
+  }
+
+  const payload: ProviderModelsResponse = await response.json();
+  const providerMatch = payload.providers.find((item) => item.provider_name === provider);
   if (!providerMatch) {
     throw new Error(`Provider not found: ${provider}`);
   }
-  return providerMatch.models;
+  return providerMatch;
 }
 
 export async function checkProviderHealth(provider: string): Promise<ProviderHealthResponse> {
-  try {
-    const healthResponse = await fetch(`${API_BASE}/health`, { cache: "no-store" });
-    if (!healthResponse.ok) {
-      return { provider, healthy: false, message: `API health check failed (${healthResponse.status})` };
-    }
-    const providers = await listProviders();
-    const exists = providers.some((item) => item.name === provider);
-    if (!exists) {
-      return { provider, healthy: false, message: `Provider not found: ${provider}` };
-    }
-    return { provider, healthy: true, message: "API healthy and provider registered" };
-  } catch (error) {
-    return {
-      provider,
-      healthy: false,
-      message: error instanceof Error ? error.message : "Provider health check failed",
-    };
+  const response = await fetch(`${API_BASE}/providers/health-check`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider }),
+  });
+  if (!response.ok) {
+    await readError(response, "Provider health check request failed");
   }
+  return response.json();
 }
 
 export async function fetchRunDetail(runId: number): Promise<RunResponse> {
