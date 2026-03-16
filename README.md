@@ -5,10 +5,12 @@ AgentHub is a local-first, cloud-optional platform for running AI agents.
 This repository currently includes:
 - FastAPI backend with SQLite-backed sessions, runs, traces, approvals, provider metadata, and a persisted skill catalog
 - Deterministic bounded execution with built-in native skills for filesystem, fetch, and web search
+- Optional model-assisted planning with enabled/ready skill discovery, bounded validation, and deterministic fallback
+- A local in-process run worker with queued, running, waiting-for-approval, completed, failed, and cancelled run states
+- Persisted execution checkpoints that let approval-gated runs resume from stored plan and step state
 - Local installable skill management for native and MCP stdio-backed skills
 - Per-skill persisted configuration with readiness checks and environment-variable secret bindings
-- Lightweight MCP stdio wrapping for initialize, tools discovery, tool calls, config-aware env injection, and clean shutdown
-- Next.js dashboard, run detail page, and a simple skills management view
+- Next.js dashboard, live run detail page, and a simple skills management view
 
 ## Repository layout
 
@@ -44,9 +46,68 @@ npm run dev
 
 The dashboard uses `NEXT_PUBLIC_API_BASE` or defaults to `http://localhost:8000`.
 
+## Run lifecycle
+
+`POST /runs` now creates queued runs instead of blocking on full execution.
+
+Current statuses:
+- `pending`
+- `queued`
+- `running`
+- `waiting_for_approval`
+- `completed`
+- `failed`
+- `cancelled`
+
+The API app starts one local in-process worker that:
+- dequeues runs
+- performs deterministic or model-assisted planning
+- executes the shared bounded executor path
+- pauses at approval boundaries
+- resumes after approval resolution
+- honors cooperative cancellation
+- persists progress after each meaningful state change
+
+Current lifecycle endpoints:
+- `POST /runs`
+- `GET /runs/{id}`
+- `GET /runs/{id}/trace`
+- `GET /runs/{id}/stream`
+- `POST /runs/{id}/cancel`
+- `POST /runs/{id}/approvals/{approval_id}/approve`
+- `POST /runs/{id}/approvals/{approval_id}/deny`
+
+## Execution modes
+
+Runs support two execution modes:
+- `deterministic`
+- `model_assisted`
+
+Deterministic mode remains the default.
+
+Model-assisted mode stays bounded:
+- one provider planning call
+- enabled, ready skills only
+- local validation before execution
+- compact decision summaries only
+- deterministic fallback on unavailable or invalid provider planning
+- no hidden reasoning storage
+
+## Live progress
+
+Run detail pages now consume `GET /runs/{id}/stream` for compact server-sent progress updates.
+The stream emits trace and run-status envelopes for:
+- queueing
+- planning
+- tool execution
+- approval pause/resume
+- cancellation
+- synthesis
+- terminal completion/failure
+
 ## Skill platform
 
-AgentHub now has a real local skill catalog with two runtime types:
+AgentHub has a real local skill catalog with two runtime types:
 - `native_python`
 - `mcp_stdio`
 
@@ -60,77 +121,11 @@ Catalog capabilities in this milestone:
 - `POST /skills/{name}/disable`
 - `POST /skills/{name}/test`
 
-Skill manifests include typed metadata such as:
-- `name`, `version`, `description`
-- `runtime_type`
-- `scopes`, `tags`, `permissions`
-- `input_schema_summary`, `output_schema_summary`
-- `capabilities`
-- `config_fields`
-- `mcp_stdio` command/config for stdio-backed skills
-
-Built-in skills are seeded into the same SQLite-backed catalog as installed local skills so the UI and API can inspect them consistently.
-
-## Skill configuration and secret handling
-
-Skills can declare configuration requirements through `config_fields`.
-Each field can define:
-- `key`, `label`, `description`
-- `required`
-- `secret`
-- `value_type`
-- `default`
-- `env_var_allowed`
-
-Persistence rules in this milestone:
-- non-secret config values are stored in SQLite
-- secret values are not stored
-- secret fields store environment variable names only
-- runtime resolves those env var names from `os.environ`
-- readiness is exposed as `ready`, `missing_required_config`, `missing_required_env_binding`, or `invalid_config`
-
-Redaction rules in this milestone:
-- raw secret values are not accepted for persistence
-- raw secret values are not returned from skill APIs
-- traces and test results redact resolved secret values
-- UI shows whether a secret binding is configured and which env var name is bound
-
-## MCP stdio support
-
-This milestone adds bounded MCP stdio support for local tool wrapping only:
-- start a configured stdio server process
-- send `initialize`
-- call `tools/list`
-- call `tools/call`
-- map configured skill fields into process env safely
-- normalize tool results into the shared AgentHub skill contract
-- shut down cleanly
-
-Current MCP scope limits:
-- stdio only
-- tool execution only
-- no MCP resources/prompts UI yet
-- no remote registry or hosted skill distribution
-- no encrypted secret storage; secret binding is env-name based only
-
-## Explicit installed-skill routing
-
-The planner remains deterministic. It does not do model-driven tool selection.
-
-Installed skills can be exercised explicitly by naming them in the task, for example:
-- `Use skill echo_mcp_test to summarize this input`
-
-When that pattern is used, the plan records an explicit selection reason and traces include the selected skill, runtime type, readiness state, and whether it was built-in or installed.
-
-## Search configuration
-
-- `AGENTHUB_SEARCH_PROVIDER` (optional): `searxng`, `duckduckgo`, or `duckduckgo_instant`
-- `AGENTHUB_SEARXNG_BASE_URL` (optional): required when provider is `searxng`
-
 ## Current limits
 
-- Local skill install only; no remote marketplace or publishing flow
-- Built-in deterministic runtime remains synchronous in the current repository state
-- MCP support is intentionally narrow and focused on stdio tool calls
-- No model-driven routing, distributed workers, browser marketplace UX, or hosted sync
+- The worker is local and in-process only; there is no distributed job backend
+- Cancellation is cooperative at safe step boundaries
+- Approval resumption is checkpoint-based and local to the current process/database
+- Model-assisted planning is a bounded planner input, not an autonomous loop
+- The committed web lint config is present, but frontend lint validation may still require local npm dependency installation in environments where `eslint` is not yet installed
 - Temp validation folders such as `.deps/` and `apps/api/.vendor/` are ignored and should not be committed

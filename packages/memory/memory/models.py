@@ -18,13 +18,21 @@ class Run(SQLModel, table=True):
     task: str
     provider: str
     model: str
+    execution_mode: str = "deterministic"
+    planning_source: str = "deterministic"
+    planning_summary: str = ""
+    fallback_reason: str | None = None
     status: str = "pending"
+    cancel_requested: bool = False
     final_output: str | None = None
     synthesis_mode: str | None = None
     synthesis_status: str | None = None
     synthesis_error_summary: str | None = None
     execution_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     evidence_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    budget_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    budget_usage_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    execution_state: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -40,8 +48,12 @@ class TraceEventRecord(SQLModel, table=True):
 class ApprovalRequest(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     run_id: int = Field(foreign_key="run.id")
+    step_id: str | None = None
     reason: str
     status: str = "pending"
+    resolution_summary: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class SkillDefinition(SQLModel, table=True):

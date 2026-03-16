@@ -1,13 +1,13 @@
-﻿import re
+import re
 
 from .contracts import AgentRequest, PlanStep
 
 _URL_RE = re.compile(r"https?://[^\s)\]]+", re.IGNORECASE)
 _FILE_HINT_RE = re.compile(
-    r"(?:\./|/|[\w\-]+\.[a-zA-Z0-9]{1,8}|read\s+file|list\s+(?:files|directory|dir)|repo|directory)",
+    r"(?:\./|/|[\w\-]+\.[a-zA-Z0-9]{1,8}|read\s+file|list\s+(?:files|directory|dir)|directory)",
     re.IGNORECASE,
 )
-_RESEARCH_HINT_RE = re.compile(r"\b(research|find|compare|look\s*up|pricing|documentation|docs)\b", re.IGNORECASE)
+_RESEARCH_HINT_RE = re.compile(r"\b(research|find|compare|look\s*up|look\s+for|pricing|documentation|docs)\b", re.IGNORECASE)
 _COMPARE_HINT_RE = re.compile(r"\b(compare|versus|vs\.?|difference)\b", re.IGNORECASE)
 _EXPLICIT_SKILL_RE = re.compile(r"\buse\s+skill\s+([a-zA-Z0-9_\-]+)\b", re.IGNORECASE)
 
@@ -25,6 +25,7 @@ class Planner:
                         id="step-1",
                         title=f"Requested skill {explicit_skill} is not installed or enabled",
                         selection_reason="explicit_skill_missing",
+                        decision_summary="The task explicitly named a skill that is not currently selectable.",
                     )
                 ]
             if not self._allows_skill(request, explicit_skill):
@@ -33,6 +34,7 @@ class Planner:
                         id="step-1",
                         title=f"Requested skill {explicit_skill} is disabled for this run",
                         selection_reason="explicit_skill_disabled",
+                        decision_summary="The task explicitly named a skill that is not allowed by the run skill filter.",
                     )
                 ]
             return [
@@ -42,6 +44,7 @@ class Planner:
                     skill_name=explicit_skill,
                     skill_input={"operation": "execute", "task": task, "prompt": task},
                     selection_reason="explicit_skill_request",
+                    decision_summary="The task explicitly requested this installed skill.",
                 )
             ]
 
@@ -58,6 +61,7 @@ class Planner:
                     skill_name="filesystem",
                     skill_input={"operation": operation, "path": file_path},
                     selection_reason="path_heuristic",
+                    decision_summary="The task includes a file or directory reference, so filesystem access is the best direct tool.",
                 )
             )
 
@@ -69,6 +73,7 @@ class Planner:
                     skill_name="fetch",
                     skill_input={"url": urls[0], "source": "direct_url"},
                     selection_reason="url_heuristic",
+                    decision_summary="The task includes a direct URL, so a fetch step can retrieve the source content.",
                 )
             )
             return steps
@@ -83,6 +88,7 @@ class Planner:
                     skill_name="web_search",
                     skill_input={"query": self._search_query(task), "max_results": max_results, "timeout_seconds": 8.0},
                     selection_reason="research_heuristic",
+                    decision_summary="The task asks for research, so web search gathers candidate sources first.",
                 )
             )
             steps.append(
@@ -92,6 +98,7 @@ class Planner:
                     skill_name="fetch",
                     skill_input={"from_search": True, "max_urls": fetch_limit},
                     selection_reason="research_followup",
+                    decision_summary="Fetching top search results turns ranked links into usable source evidence.",
                 )
             )
             return steps
@@ -100,13 +107,13 @@ class Planner:
             return steps
 
         if self._is_research_task(task) and not self._allows_skill(request, "web_search"):
-            return [PlanStep(id="step-1", title="Cannot perform research because web_search skill is disabled")]
+            return [PlanStep(id="step-1", title="Cannot perform research because web_search skill is disabled", decision_summary="Research was requested, but web search is not enabled for this run.")]
         if urls:
-            return [PlanStep(id="step-1", title="Cannot fetch URL because fetch skill is disabled")]
+            return [PlanStep(id="step-1", title="Cannot fetch URL because fetch skill is disabled", decision_summary="A URL was provided, but fetch is not enabled for this run.")]
         if file_path or _FILE_HINT_RE.search(task):
-            return [PlanStep(id="step-1", title="Cannot access filesystem because filesystem skill is disabled")]
+            return [PlanStep(id="step-1", title="Cannot access filesystem because filesystem skill is disabled", decision_summary="A filesystem task was detected, but filesystem is not enabled for this run.")]
 
-        return [PlanStep(id="step-1", title="No executable tools inferred from task; provide a file path, URL, or explicit skill.")]
+        return [PlanStep(id="step-1", title="No executable tools inferred from task; provide a file path, URL, or explicit skill.", decision_summary="The deterministic planner could not infer a bounded tool path from the task text.")]
 
     @staticmethod
     def _step_id(steps: list[PlanStep]) -> str:
@@ -144,7 +151,7 @@ class Planner:
         if file_like:
             return file_like.group(0)
 
-        if re.search(r"list\s+(?:files|directory|dir)|repo", task, flags=re.IGNORECASE):
+        if re.search(r"list\s+(?:files|directory|dir)", task, flags=re.IGNORECASE):
             return "."
         return None
 

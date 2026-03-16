@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ from core.planner import Planner
 from skills import MCPStdioConfig, MCPStdioSkill, SkillConfigField, SkillConfigValueType, SkillManifest, SkillRequest, SkillRuntimeType
 
 
-def _mcp_manifest(script_path: Path, name: str = "echo_mcp_test", with_secret_config: bool = False) -> SkillManifest:
+def _mcp_manifest(script_path: Path, name: str = "echo_mcp_test", with_secret_config: bool = False, *, read_only: bool = True) -> SkillManifest:
     config_fields = []
     env_map = {}
     test_input = {"prompt": "ping"}
@@ -37,8 +38,9 @@ def _mcp_manifest(script_path: Path, name: str = "echo_mcp_test", with_secret_co
         runtime_type=SkillRuntimeType.MCP_STDIO,
         scopes=["local:test"],
         tags=["mcp", "test"],
+        capability_categories=["custom_tool"],
         config_fields=config_fields,
-        capabilities=[{"operation": "execute", "read_only": True}],
+        capabilities=[{"operation": "execute", "read_only": read_only}],
         mcp_stdio=MCPStdioConfig(
             command=sys.executable,
             args=[str(script_path)],
@@ -48,6 +50,20 @@ def _mcp_manifest(script_path: Path, name: str = "echo_mcp_test", with_secret_co
         ),
         test_input=test_input,
     )
+
+
+def wait_for_status(client: TestClient, run_id: int, statuses: set[str], timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    worker = client.app.state.run_worker
+    while time.time() < deadline:
+        worker.wait_for_idle(timeout=0.2)
+        payload = client.get(f"/runs/{run_id}")
+        assert payload.status_code == 200
+        run = payload.json()
+        if run["status"] in statuses:
+            return run
+        time.sleep(0.05)
+    raise AssertionError(f"Run {run_id} did not reach one of {statuses}")
 
 
 def test_skill_manifest_validation_requires_mcp_config() -> None:
@@ -119,7 +135,7 @@ def test_skill_catalog_routes_install_config_and_redact(monkeypatch) -> None:
         assert configured.status_code == 200
         configured_payload = configured.json()
         assert configured_payload["readiness_status"] == "ready"
-        assert json.dumps(configured_payload) .find(secret_value) == -1
+        assert json.dumps(configured_payload).find(secret_value) == -1
 
         detail = client.get("/skills/echo_mcp_route_config/config")
         assert detail.status_code == 200
@@ -176,8 +192,8 @@ def test_explicit_installed_skill_run_reports_config_failure() -> None:
         )
         assert create_run.status_code == 200
         run_payload = create_run.json()
-        assert run_payload["run"]["status"] == "failed"
-        assert "Missing required environment variable binding" in (run_payload["run"]["final_output"] or "")
+        run = wait_for_status(client, run_payload["run"]["id"], {"failed"})
+        assert "Missing required environment variable binding" in (run["final_output"] or "")
 
         trace = client.get(f"/runs/{run_payload['run']['id']}/trace")
         assert trace.status_code == 200

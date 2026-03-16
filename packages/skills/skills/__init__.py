@@ -2,6 +2,7 @@ from .base import (
     MCPStdioConfig,
     Skill,
     SkillCapability,
+    SkillCapabilityCategory,
     SkillConfigField,
     SkillConfigValueType,
     SkillManifest,
@@ -22,6 +23,7 @@ from .web_search import WebSearchSkill
 __all__ = [
     "Skill",
     "SkillCapability",
+    "SkillCapabilityCategory",
     "SkillConfigField",
     "SkillConfigValueType",
     "SkillManifest",

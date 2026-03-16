@@ -1,8 +1,18 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
-from .base import Skill, SkillCapability, SkillManifest, SkillRequest, SkillResult, SkillRuntimeType, SkillTestResult, SkillTestStatus
+from .base import (
+    Skill,
+    SkillCapability,
+    SkillCapabilityCategory,
+    SkillManifest,
+    SkillRequest,
+    SkillResult,
+    SkillRuntimeType,
+    SkillTestResult,
+    SkillTestStatus,
+)
 
 
 class FilesystemConfig:
@@ -24,6 +34,7 @@ class FilesystemSkill(Skill):
         scopes=["filesystem:read"],
         permissions=["fs:read"],
         tags=["builtin", "filesystem"],
+        capability_categories=[SkillCapabilityCategory.READ_FILES],
         input_schema_summary={"operation": "list_directory or read_text_file", "path": "Path relative to workspace root"},
         output_schema_summary={"entries": "directory listing", "content": "UTF-8 file content preview"},
         capabilities=[
@@ -72,7 +83,7 @@ class FilesystemSkill(Skill):
                     summary=f"Listed {len(entries)} entries",
                     runtime_type=self.manifest.runtime_type,
                     skill_name=self.manifest.name,
-                    metadata={"builtin": True},
+                    metadata={"builtin": True, "capability_categories": [item.value for item in self.manifest.capability_categories]},
                 )
             if operation == "read_text_file":
                 content = self.read_text_file(path)
@@ -82,14 +93,14 @@ class FilesystemSkill(Skill):
                     summary=f"Read {len(content)} chars from {path}",
                     runtime_type=self.manifest.runtime_type,
                     skill_name=self.manifest.name,
-                    metadata={"builtin": True},
+                    metadata={"builtin": True, "capability_categories": [item.value for item in self.manifest.capability_categories]},
                 )
             return SkillResult(
                 success=False,
                 error=f"Unsupported operation: {operation}",
                 runtime_type=self.manifest.runtime_type,
                 skill_name=self.manifest.name,
-                metadata={"builtin": True},
+                metadata={"builtin": True, "capability_categories": [item.value for item in self.manifest.capability_categories]},
             )
         except FilesystemValidationError as exc:
             return SkillResult(
@@ -97,7 +108,7 @@ class FilesystemSkill(Skill):
                 error=str(exc),
                 runtime_type=self.manifest.runtime_type,
                 skill_name=self.manifest.name,
-                metadata={"builtin": True},
+                metadata={"builtin": True, "capability_categories": [item.value for item in self.manifest.capability_categories]},
             )
 
     def test(self) -> SkillTestResult:

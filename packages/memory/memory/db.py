@@ -6,11 +6,26 @@ from sqlmodel import SQLModel, Session, create_engine
 
 
 RUN_COLUMN_MIGRATIONS = {
+    "execution_mode": "TEXT DEFAULT 'deterministic'",
+    "planning_source": "TEXT DEFAULT 'deterministic'",
+    "planning_summary": "TEXT DEFAULT ''",
+    "fallback_reason": "TEXT",
     "synthesis_mode": "TEXT",
     "synthesis_status": "TEXT",
     "synthesis_error_summary": "TEXT",
     "execution_summary": "JSON DEFAULT '{}'",
     "evidence_summary": "JSON DEFAULT '{}'",
+    "budget_config": "JSON DEFAULT '{}'",
+    "budget_usage_summary": "JSON DEFAULT '{}'",
+    "cancel_requested": "BOOLEAN DEFAULT 0",
+    "execution_state": "JSON DEFAULT '{}'",
+}
+
+APPROVAL_COLUMN_MIGRATIONS = {
+    "step_id": "TEXT",
+    "resolution_summary": "TEXT",
+    "created_at": "TIMESTAMP",
+    "updated_at": "TIMESTAMP",
 }
 
 SKILL_COLUMN_MIGRATIONS = {
@@ -64,6 +79,7 @@ def init_sqlite(path: str = "sqlite:///./agenthub.db"):
     engine = create_sqlite_engine(path)
     SQLModel.metadata.create_all(engine)
     _ensure_columns(path, "run", RUN_COLUMN_MIGRATIONS)
+    _ensure_columns(path, "approvalrequest", APPROVAL_COLUMN_MIGRATIONS)
     _ensure_columns(path, "skilldefinition", SKILL_COLUMN_MIGRATIONS)
     return engine
 

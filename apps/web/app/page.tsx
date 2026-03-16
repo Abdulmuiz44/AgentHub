@@ -1,16 +1,19 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { CreateRunResult, ProviderSummary, checkProviderHealth, createRun, listProviderModels, listProviders } from "../lib/api";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [task, setTask] = useState("");
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [provider, setProvider] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
+  const [executionMode, setExecutionMode] = useState<"deterministic" | "model_assisted">("deterministic");
   const [providerHealth, setProviderHealth] = useState<string | null>(null);
   const [isLoadingProviders, setIsLoadingProviders] = useState(true);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -78,10 +81,17 @@ export default function DashboardPage() {
     setRunResult(null);
     setIsSubmitting(true);
     try {
-      const result = await createRun({ task, provider, model, enabled_skills: enabledSkills, execute_now: true });
+      const result = await createRun({
+        task,
+        provider,
+        model,
+        enabled_skills: enabledSkills,
+        execution_mode: executionMode,
+      });
       setRunResult(result);
-      setMessage(`Run #${result.run.id} finished with status ${result.run.status}.`);
+      setMessage(`Run #${result.run.id} queued with status ${result.run.status}.`);
       setTask("");
+      router.push(`/runs/${result.run.id}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unexpected error");
     } finally {
@@ -111,6 +121,15 @@ export default function DashboardPage() {
         </div>
 
         <div>
+          <label className="mb-1 block text-sm">Execution mode</label>
+          <select className="w-full rounded bg-slate-900 p-2" value={executionMode} onChange={(e) => setExecutionMode(e.target.value as "deterministic" | "model_assisted")}>
+            <option value="deterministic">deterministic</option>
+            <option value="model_assisted">model_assisted</option>
+          </select>
+          <p className="mt-1 text-xs text-slate-400">Model-assisted mode uses a bounded provider planning step and falls back to deterministic planning when needed.</p>
+        </div>
+
+        <div>
           <label className="mb-1 block text-sm">Provider selector</label>
           <select className="w-full rounded bg-slate-900 p-2" value={provider} onChange={(e) => setProvider(e.target.value)} disabled={isLoadingProviders || providers.length === 0}>
             {providerOptions.map((item) => (
@@ -131,24 +150,24 @@ export default function DashboardPage() {
         </div>
 
         <div>
-          <p className="text-sm text-slate-300">Enabled built-in defaults for this form: {enabledSkills.join(", ")}</p>
+          <p className="text-sm text-slate-300">Enabled skills for this form: {enabledSkills.join(", ")}</p>
         </div>
 
         <button type="submit" disabled={isSubmitting || !provider || !model || isLoadingProviders || isLoadingModels} className="rounded bg-blue-600 px-4 py-2 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60">
-          {isSubmitting ? "Executing run..." : "Submit"}
+          {isSubmitting ? "Queueing run..." : "Submit"}
         </button>
       </form>
       {message ? <p className="mt-4 text-sm text-slate-200">{message}</p> : null}
 
       {runResult ? (
         <section className="mt-6 space-y-2 rounded-lg border border-slate-700 p-4">
-          <h2 className="text-lg font-medium">Run Result</h2>
+          <h2 className="text-lg font-medium">Queued run</h2>
           <p className="text-sm">Run ID: {runResult.run.id}</p>
           <p className="text-sm">Status: {runResult.run.status}</p>
-          <p className="text-sm">Evidence summary: {JSON.stringify(runResult.run.evidence_summary ?? {})}</p>
-          <p className="text-sm whitespace-pre-wrap">Final output: {runResult.run.final_output ?? "(none)"}</p>
+          <p className="text-sm">Execution mode: {runResult.run.execution_mode}</p>
+          <p className="text-sm">Planning source: {runResult.run.planning_source}</p>
           <p className="text-sm">
-            <Link href={`/runs/${runResult.run.id}`} className="text-blue-400 underline hover:text-blue-300">Open full run details</Link>
+            <Link href={`/runs/${runResult.run.id}`} className="text-blue-400 underline hover:text-blue-300">Open live run details</Link>
           </p>
         </section>
       ) : null}

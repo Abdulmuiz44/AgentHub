@@ -1,8 +1,18 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from .base import Skill, SkillCapability, SkillManifest, SkillRequest, SkillResult, SkillRuntimeType, SkillTestResult, SkillTestStatus
+from .base import (
+    Skill,
+    SkillCapability,
+    SkillCapabilityCategory,
+    SkillManifest,
+    SkillRequest,
+    SkillResult,
+    SkillRuntimeType,
+    SkillTestResult,
+    SkillTestStatus,
+)
 from .search_provider import SearchProviderError, SearchProviderRequest, SearchProviderResolver, normalize_result_url
 
 
@@ -34,6 +44,7 @@ class WebSearchSkill(Skill):
         scopes=["network:read"],
         permissions=["net:http"],
         tags=["builtin", "search", "research"],
+        capability_categories=[SkillCapabilityCategory.WEB_SEARCH],
         input_schema_summary={"query": "Web search query", "max_results": "1-10 results"},
         output_schema_summary={"results": "normalized ranked search results"},
         capabilities=[SkillCapability(operation="search_web", read_only=True, description="Search the public web")],
@@ -51,7 +62,7 @@ class WebSearchSkill(Skill):
                 error=f"Invalid search input: {exc}",
                 runtime_type=self.manifest.runtime_type,
                 skill_name=self.manifest.name,
-                metadata={"builtin": True},
+                metadata={"builtin": True, "capability_categories": [item.value for item in self.manifest.capability_categories]},
             )
 
         if not self._is_standard_query(data.query):
@@ -60,7 +71,7 @@ class WebSearchSkill(Skill):
                 error="Only standard web search queries are supported",
                 runtime_type=self.manifest.runtime_type,
                 skill_name=self.manifest.name,
-                metadata={"builtin": True},
+                metadata={"builtin": True, "capability_categories": [item.value for item in self.manifest.capability_categories]},
             )
 
         try:
@@ -74,7 +85,7 @@ class WebSearchSkill(Skill):
                 error=str(exc),
                 runtime_type=self.manifest.runtime_type,
                 skill_name=self.manifest.name,
-                metadata={"builtin": True},
+                metadata={"builtin": True, "capability_categories": [item.value for item in self.manifest.capability_categories]},
             )
 
         deduped: list[WebSearchResult] = []
@@ -102,7 +113,7 @@ class WebSearchSkill(Skill):
             summary=f"Found {len(deduped)} normalized web results for query",
             runtime_type=self.manifest.runtime_type,
             skill_name=self.manifest.name,
-            metadata={"builtin": True, "provider": provider.name},
+            metadata={"builtin": True, "provider": provider.name, "capability_categories": [item.value for item in self.manifest.capability_categories]},
         )
 
     def test(self) -> SkillTestResult:
