@@ -1,91 +1,125 @@
-# Runtime Architecture (Deterministic Local Skill Platform Slice)
+# Runtime Architecture (Async Local Worker Slice)
 
 ## Components
-- **API (`apps/api`)**: creates runs, exposes run/trace routes, and exposes typed skill catalog/install/config/enable/disable/test routes.
-- **Core (`packages/core`)**: deterministic planner, bounded executor, evidence aggregation, synthesis engine, and runtime contracts.
-- **Skill catalog service (`apps/api/app/services/skills.py`)**: seeds built-ins, persists local skill definitions, loads manifests, validates readiness, tests skills, and builds runtime registries.
-- **Skill config service (`apps/api/app/services/skill_config.py`)**: owns config schema handling, redacted config responses, env-binding validation, readiness computation, runtime config resolution, and secret redaction helpers.
+- **API (`apps/api`)**: creates queued runs, exposes run/trace/stream/cancel/approval routes, and exposes typed skill catalog/install/config/enable/disable/test routes.
+- **Run worker (`apps/api/app/services/worker.py`)**: single local in-process worker that dequeues runs, resumes incomplete queued work on startup, and executes one run at a time.
+- **Runtime service (`apps/api/app/services/runtime.py`)**: owns queued-run creation, checkpoint persistence, planning, approval pause/resume, cancellation handling, synthesis finalization, and run serialization.
+- **Core (`packages/core`)**: deterministic planner, bounded provider-assisted planning service, shared executor, evidence aggregation, synthesis engine, and runtime contracts.
+- **Skill catalog service (`apps/api/app/services/skills.py`)**: seeds built-ins, persists local skill definitions, validates readiness, exposes planner-facing eligible skills, tests skills, and builds runtime registries.
 - **Memory (`packages/memory`)**: SQLModel entities and SQLite repositories for sessions, runs, traces, approvals, providers, and skill definitions/config state.
 - **Skills (`packages/skills`)**: shared manifest spec, native built-in skills, MCP stdio wrapper, and unified skill registry.
-- **Web (`apps/web`)**: dashboard, run detail UI, and a practical skills management page.
+- **Web (`apps/web`)**: dashboard, live run detail UI, and a practical skills management page.
 
-## Skill config flow
-1. A skill manifest declares `config_fields`.
-2. Each field can be required/optional and secret/non-secret.
-3. The catalog stores:
-   - non-secret values in `config_values_json`
-   - secret bindings as env var names in `secret_bindings_json`
-4. The config service validates stored config and computes readiness:
-   - `ready`
-   - `missing_required_config`
-   - `missing_required_env_binding`
-   - `invalid_config`
-5. At test/execution time, the config service resolves env-bound secrets from `os.environ`.
-6. Resolved secret values are used only in-memory and are never persisted.
-7. Any strings derived from resolved secret values are redacted before being surfaced through skill test results, API responses, or trace summaries.
+## Run flow
+1. `POST /runs` persists a queued run and an initial compact `execution_state` checkpoint.
+2. The app-scoped worker dequeues the run outside the request path.
+3. Planning runs inside the worker:
+   - deterministic mode uses the heuristic planner
+   - model-assisted mode performs one bounded provider planning call with local validation and deterministic fallback
+4. The worker persists the selected plan and planning metadata to the run checkpoint.
+5. The executor runs one bounded step at a time, updating checkpointed progress after each step.
+6. If the next step requires approval, the worker creates or reuses an approval record, marks the run `waiting_for_approval`, emits pause traces, and exits cleanly.
+7. Approval resolution re-enqueues the run; the worker reloads the checkpoint and resumes from the stored step index.
+8. If cancellation is requested, the worker stops at the next safe boundary and marks the run `cancelled`.
+9. After all steps complete, the runtime performs synthesis and persists the terminal run state.
+10. `GET /runs/{id}/stream` exposes compact SSE envelopes for trace and run updates.
 
-## Skill platform flow
-1. Built-in native skills are defined in code with typed manifests.
-2. On demand, the skill catalog service seeds built-ins into SQLite-backed `SkillDefinition` records.
-3. Local manifests can be installed through `POST /skills/install` or loaded from a manifest path.
-4. Skill definitions persist runtime type, enabled state, manifest/config, readiness state, tags/scopes, install source, and last test result.
-5. The catalog service builds a runtime `SkillRegistry` from enabled skill definitions.
-6. Planner behavior stays deterministic:
-   - normal built-in heuristics for file/url/research tasks
-   - explicit routing for `Use skill <name> ...`
-7. Executor invokes both native and MCP stdio skills through the same request/result contract.
-8. Trace events include compact runtime metadata such as skill name, runtime type, built-in vs installed, readiness state, and safe result summaries.
+## Run lifecycle
+Current persisted statuses:
+- `pending`
+- `queued`
+- `running`
+- `waiting_for_approval`
+- `completed`
+- `failed`
+- `cancelled`
 
-## Runtime types
-Supported in this milestone:
-- `native_python`
-- `mcp_stdio`
+Related persisted run metadata includes:
+- `execution_mode`
+- `planning_source`
+- `planning_summary`
+- `fallback_reason`
+- `budget_config`
+- `budget_usage_summary`
+- `execution_state`
+- `cancel_requested`
 
-Reserved for future expansion:
-- `mcp_http`
-- `subprocess_tool`
+## Execution checkpoint model
+`execution_state` is a compact JSON checkpoint containing:
+- enabled skills for the run
+- bounded budget config
+- current plan
+- current step index
+- accumulated step results
+- evidence bundle summary state
+- working search results for fetch-from-search continuation
+- planning source/summary/fallback metadata
+- budget usage summary
+- pending approval id if paused
+- failure context if present
 
-## Manifest shape
-The shared manifest spec includes:
-- `name`, `version`, `description`
-- `runtime_type`
-- `scopes`, `permissions`, `tags`
-- `enabled_by_default`
-- `input_schema_summary`, `output_schema_summary`
-- `capabilities`
-- `config_fields`
-- `install_source`
-- `test_input`
-- `mcp_stdio` config for stdio-backed skills:
-  - `command`
-  - `args`
-  - `env_var_refs`
-  - `env_map`
-  - `working_directory`
-  - `startup_timeout_seconds`
-  - `call_timeout_seconds`
-  - `tool_name`
+This state is sufficient for:
+- approval pause/resume
+- cancellation at safe boundaries
+- restart recovery for queued/running runs that can be safely re-queued
 
-## MCP stdio wrapper behavior
-The local MCP stdio wrapper intentionally stays small:
-- launches a configured stdio process
-- sends `initialize`
-- discovers tools via `tools/list`
-- invokes a selected tool via `tools/call`
-- injects resolved process env entries from safe config resolution
-- normalizes the response into the shared AgentHub `SkillResult`
-- redacts configured secret values from surfaced result/error text
-- shuts down cleanly with `shutdown` and `exit`
+## Approvals
+Approval support is now first-class in the worker lifecycle.
 
-Current limits:
-- stdio only
-- tool invocation only
-- no MCP resources/prompts workflow
-- one process per execution/test call
-- no encrypted local secret vault; env-binding is the only secret path in this milestone
+When a selected step is approval-gated:
+- an approval record is created or reused
+- the run status becomes `waiting_for_approval`
+- the checkpoint stores the pending approval id
+- `approval.requested` and `run.paused` traces are emitted
+
+When approval is resolved:
+- `approval.resolved` is traced
+- approved runs emit `run.resumed` and continue from the stored step index
+- denied runs terminate clearly with `run.failed`
+
+## Cancellation
+Cancellation remains cooperative and bounded.
+
+Current behavior:
+- queued runs can be cancelled before execution
+- waiting runs can be cancelled immediately
+- running runs mark `cancel_requested` and stop at the next safe boundary
+- cancellation emits `run.cancel_requested` and `run.cancelled` traces
+- no subprocess force-kill logic is introduced in this slice
+
+## Live progress streaming
+`GET /runs/{id}/stream` emits compact SSE envelopes of two kinds:
+- `trace`: ordered trace event records
+- `run`: current serialized run state when status changes
+
+The run detail page uses this stream to keep queued/running/waiting/completed/failed/cancelled views current without polling-heavy UI code.
+
+## Trace model
+Important async lifecycle events now include:
+- `run.queued`
+- `run.started`
+- `run.paused`
+- `run.resumed`
+- `run.cancel_requested`
+- `run.cancelled`
+- `planning.started`
+- `planning.completed`
+- `planning.fallback`
+- `approval.requested`
+- `approval.resolved`
+- `tool.started`
+- `tool.completed`
+- `tool.failed`
+- `synthesis.started`
+- `synthesis.completed`
+- `run.completed`
+- `run.failed`
+
+Trace payloads remain compact and do not store hidden reasoning, secrets, or large provider dumps.
 
 ## Current limitations
-- The current repository runtime still executes runs synchronously in-request.
-- Skill installation is local-manifest only.
-- Native built-ins are still the only heuristically selected skills unless the task explicitly names an installed skill.
-- Trace payloads remain compact and do not store full raw MCP protocol exchanges or full env payloads.
+- The worker is still single-process and local to the API app.
+- Cancellation is boundary-based, not forceful termination of running subprocess trees.
+- Restart handling re-queues queued/running runs, but does not attempt distributed locking or exactly-once execution semantics.
+- Approval routing is step-boundary based; there is no broader policy engine in this milestone.
+- The committed web lint config is present, but lint validation still depends on local npm dependency availability.

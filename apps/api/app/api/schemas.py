@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,7 +20,19 @@ class RunCreateRequest(BaseModel):
     model: str = "deterministic"
     session_id: int | None = None
     enabled_skills: list[str] = Field(default_factory=list)
-    execute_now: bool = True
+    execute_now: bool = False
+    execution_mode: Literal["deterministic", "model_assisted"] = "deterministic"
+
+
+class ApprovalResponse(BaseModel):
+    id: int
+    run_id: int
+    step_id: str | None = None
+    reason: str
+    status: str
+    resolution_summary: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class TraceResponse(BaseModel):
@@ -37,13 +49,21 @@ class RunResponse(BaseModel):
     task: str
     provider: str
     model: str
+    execution_mode: str
+    planning_source: str
+    planning_summary: str
+    fallback_reason: str | None = None
     status: str
+    cancel_requested: bool = False
     final_output: str | None = None
     synthesis_mode: str | None = None
     synthesis_status: str | None = None
     synthesis_error_summary: str | None = None
     execution_summary: dict[str, Any] = Field(default_factory=dict)
     evidence_summary: dict[str, Any] = Field(default_factory=dict)
+    budget_config: dict[str, Any] = Field(default_factory=dict)
+    budget_usage_summary: dict[str, Any] = Field(default_factory=dict)
+    pending_approval: ApprovalResponse | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -51,6 +71,11 @@ class RunResponse(BaseModel):
 class RunCreateResponse(BaseModel):
     run: RunResponse
     trace_events: list[TraceResponse]
+
+
+class ApprovalResolveResponse(BaseModel):
+    run: RunResponse
+    approval: ApprovalResponse
 
 
 class RunExecutionSummary(BaseModel):
@@ -106,6 +131,7 @@ class SkillManifestPayload(BaseModel):
     scopes: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    capability_categories: list[str] = Field(default_factory=list)
     enabled_by_default: bool = True
     input_schema_summary: dict[str, Any] = Field(default_factory=dict)
     output_schema_summary: dict[str, Any] = Field(default_factory=dict)
@@ -159,6 +185,7 @@ class SkillResponse(BaseModel):
     is_builtin: bool
     scopes: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    capability_categories: list[str] = Field(default_factory=list)
     install_source: str | None = None
     last_test_status: str | None = None
     last_test_summary: str | None = None

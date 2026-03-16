@@ -1,7 +1,7 @@
 # AgentHub Roadmap (v0.1)
 
 ## Goal
-Ship a minimal local-first platform foundation with one deterministic runtime, one skill system, one model gateway, one dashboard, and one trace system.
+Ship a minimal local-first platform foundation with one bounded runtime, one skill system, one model gateway, one dashboard, and one trace system.
 
 ## Milestones
 1. Root-level monorepo scaffold and accurate developer docs.
@@ -12,4 +12,6 @@ Ship a minimal local-first platform foundation with one deterministic runtime, o
 6. Completed: deterministic research workflow with `web_search`, bounded search->fetch execution, evidence aggregation, and improved synthesis/trace visibility.
 7. Completed: local installable skill catalog with runtime-typed manifests, SQLite-backed skill persistence, MCP stdio wrapping, enable/disable/test flows, and a skills management UI.
 8. Completed: persisted per-skill configuration, env-var-name secret bindings, readiness checks, config-aware MCP env injection, and redacted skill config/test UX.
-9. Next: upgrade the run lifecycle to true asynchronous pause/resume orchestration so installed and configured skills can participate in longer-lived approval-aware workflows.
+9. Completed: optional model-assisted planning with enabled/ready skill discovery, capability metadata, bounded budgets, planning validation, deterministic fallback, and planning-aware run/UI traces.
+10. Completed: async local run orchestration with queued/running/waiting/cancelled lifecycle, approval pause/resume checkpoints, cooperative cancellation, SSE progress streaming, and preserved deterministic/model-assisted planning paths.
+11. Next: improve restart resilience and timestamp hygiene by making step replay semantics more explicitly idempotent and replacing remaining `datetime.utcnow()` usage with timezone-aware UTC timestamps.

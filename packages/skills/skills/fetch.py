@@ -1,11 +1,21 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import ipaddress
 import socket
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from .base import Skill, SkillCapability, SkillManifest, SkillRequest, SkillResult, SkillRuntimeType, SkillTestResult, SkillTestStatus
+from .base import (
+    Skill,
+    SkillCapability,
+    SkillCapabilityCategory,
+    SkillManifest,
+    SkillRequest,
+    SkillResult,
+    SkillRuntimeType,
+    SkillTestResult,
+    SkillTestStatus,
+)
 
 
 class FetchValidationError(ValueError):
@@ -27,6 +37,7 @@ class FetchSkill(Skill):
         scopes=["network:read"],
         permissions=["net:http"],
         tags=["builtin", "http", "research"],
+        capability_categories=[SkillCapabilityCategory.WEB_FETCH],
         input_schema_summary={"url": "HTTP or HTTPS URL to fetch"},
         output_schema_summary={"metadata": "fetch metadata", "text": "UTF-8 response preview"},
         capabilities=[SkillCapability(operation="fetch_url", read_only=True, description="Fetch a remote URL")],
@@ -45,7 +56,7 @@ class FetchSkill(Skill):
                 summary=f"Fetched {metadata['url']}",
                 runtime_type=self.manifest.runtime_type,
                 skill_name=self.manifest.name,
-                metadata={"builtin": True},
+                metadata={"builtin": True, "capability_categories": [item.value for item in self.manifest.capability_categories]},
             )
         except FetchValidationError as exc:
             return SkillResult(
@@ -53,7 +64,7 @@ class FetchSkill(Skill):
                 error=str(exc),
                 runtime_type=self.manifest.runtime_type,
                 skill_name=self.manifest.name,
-                metadata={"builtin": True},
+                metadata={"builtin": True, "capability_categories": [item.value for item in self.manifest.capability_categories]},
             )
 
     def test(self) -> SkillTestResult:

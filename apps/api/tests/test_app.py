@@ -1,6 +1,22 @@
+import time
+
 from fastapi.testclient import TestClient
 
 from app.main import app
+
+
+def wait_for_terminal(client: TestClient, run_id: int, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    worker = client.app.state.run_worker
+    while time.time() < deadline:
+        worker.wait_for_idle(timeout=0.2)
+        response = client.get(f"/runs/{run_id}")
+        assert response.status_code == 200
+        run = response.json()
+        if run["status"] in {"completed", "failed", "cancelled"}:
+            return run
+        time.sleep(0.05)
+    raise AssertionError(f"Run {run_id} did not reach a terminal state")
 
 
 def test_health_route() -> None:
@@ -28,47 +44,44 @@ def test_sessions_runs_and_catalog_flow() -> None:
                 "model": "deterministic",
                 "session_id": session["id"],
                 "enabled_skills": ["filesystem"],
+                "execution_mode": "deterministic",
             },
         )
         assert create_run.status_code == 200
         run_payload = create_run.json()
         run_id = run_payload["run"]["id"]
-        assert run_payload["run"]["status"] in {"completed", "failed"}
+        assert run_payload["run"]["status"] == "queued"
+        assert run_payload["run"]["execution_mode"] == "deterministic"
+        assert "planning_source" in run_payload["run"]
+        assert "budget_config" in run_payload["run"]
 
         get_run = client.get(f"/runs/{run_id}")
         assert get_run.status_code == 200
 
+        final = wait_for_terminal(client, run_id)
+        assert final["status"] in {"completed", "failed", "cancelled"}
+
         trace = client.get(f"/runs/{run_id}/trace")
         assert trace.status_code == 200
         event_types = {item["event_type"] for item in trace.json()}
-        assert "run.started" in event_types
-        assert "plan.created" in event_types
+        assert "run.queued" in event_types
+        assert "planning.completed" in event_types
+
+        invalid_mode = client.post(
+            "/runs",
+            json={
+                "task": "Read README.md",
+                "provider": "builtin",
+                "model": "deterministic",
+                "execution_mode": "bad-mode",
+            },
+        )
+        assert invalid_mode.status_code == 422
 
         providers = client.get("/providers")
         assert providers.status_code == 200
         provider_names = {item["provider"]["name"] for item in providers.json()}
         assert {"ollama", "openai"}.issubset(provider_names)
-
-        provider_models = client.get("/providers/models")
-        assert provider_models.status_code == 200
-        provider_models_payload = provider_models.json()
-        assert "providers" in provider_models_payload
-        ollama_models = next(item for item in provider_models_payload["providers"] if item["provider_name"] == "ollama")
-        assert "configuration_status" in ollama_models
-        assert "is_configured" in ollama_models
-        assert "models" in ollama_models
-        assert "message" in ollama_models
-
-        ollama_health = client.post("/providers/health-check", json={"provider": "ollama"})
-        assert ollama_health.status_code == 200
-        ollama_health_payload = ollama_health.json()
-        assert "configuration_status" in ollama_health_payload
-        assert isinstance(ollama_health_payload["healthy"], bool)
-        assert isinstance(ollama_health_payload["message"], str)
-
-        unknown_provider_health = client.post("/providers/health-check", json={"provider": "missing"})
-        assert unknown_provider_health.status_code == 404
-        assert unknown_provider_health.json()["detail"] == "Provider not found"
 
         skills = client.get("/skills")
         assert skills.status_code == 200

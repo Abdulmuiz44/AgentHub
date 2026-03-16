@@ -1,15 +1,34 @@
-﻿import json
+import json
 import shutil
+import sys
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app.db.session import engine
 from app.main import app
-from core.contracts import AgentRequest, EvidenceBundle, RunContext
+from core.contracts import (
+    AgentRequest,
+    ApprovalStatus,
+    EvidenceBundle,
+    ExecutionBudget,
+    ExecutionMode,
+    ExecutionState,
+    PlanStep,
+    PlanningSkillDescriptor,
+    PlanningSource,
+    RunContext,
+)
 from core.executor import Executor
 from core.planner import Planner
+from core.planning_service import PlanningService
 from core.synthesis import SynthesisEngine
 from core.tracing import TraceCollector
+from memory.runs import get_run
+from models import ProviderAdapter, ProviderCapability, ProviderGenerationRequest, ProviderGenerationResponse, ProviderHealthCheck
+from skills import MCPStdioConfig, SkillManifest, SkillRuntimeType
 from skills.base import SkillRequest
 from skills.fetch import FetchSkill
 from skills.filesystem import FilesystemConfig, FilesystemSkill
@@ -37,6 +56,69 @@ class StubSearchResolver:
         return StubSearchProvider()
 
 
+class StubPlanningAdapter(ProviderAdapter):
+    def __init__(self, output_text: str, *, provider_name: str = "ollama") -> None:
+        self._output_text = output_text
+        self._provider_name = provider_name
+
+    @property
+    def capability(self) -> ProviderCapability:
+        return ProviderCapability(name=self._provider_name, display_name=self._provider_name.title(), models=["stub-model"], supports_streaming=False)
+
+    @property
+    def provider_name(self) -> str:
+        return self._provider_name
+
+    @property
+    def default_timeout(self) -> float:
+        return 5.0
+
+    def health_check(self) -> ProviderHealthCheck:
+        return ProviderHealthCheck(provider=self._provider_name, healthy=True, message="ok")
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def generate(self, request: ProviderGenerationRequest) -> ProviderGenerationResponse:
+        if request.metadata.get("purpose") == "planning":
+            return ProviderGenerationResponse(provider=self._provider_name, model=request.model, output_text=self._output_text)
+        return ProviderGenerationResponse(provider=self._provider_name, model=request.model, output_text="provider synthesis output")
+
+
+def _approval_manifest(script_path: Path, name: str) -> SkillManifest:
+    return SkillManifest(
+        name=name,
+        version="0.1.0",
+        description="Approval gated MCP skill",
+        runtime_type=SkillRuntimeType.MCP_STDIO,
+        scopes=["local:test"],
+        tags=["mcp", "approval"],
+        capability_categories=["custom_tool"],
+        capabilities=[{"operation": "execute", "read_only": False}],
+        mcp_stdio=MCPStdioConfig(
+            command=sys.executable,
+            args=[str(script_path)],
+            tool_name="echo",
+            test_input={"prompt": "ping"},
+        ),
+        test_input={"prompt": "ping"},
+    )
+
+
+def wait_for_status(client: TestClient, run_id: int, statuses: set[str], timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    worker = client.app.state.run_worker
+    while time.time() < deadline:
+        worker.wait_for_idle(timeout=0.2)
+        payload = client.get(f"/runs/{run_id}")
+        assert payload.status_code == 200
+        run = payload.json()
+        if run["status"] in statuses:
+            return run
+        time.sleep(0.05)
+    raise AssertionError(f"Run {run_id} did not reach one of {statuses}")
+
+
 def test_planner_heuristics_url_file_and_research() -> None:
     planner = Planner()
 
@@ -52,6 +134,21 @@ def test_planner_heuristics_url_file_and_research() -> None:
     assert plan_research[0].skill_name == "web_search"
     assert plan_research[1].skill_name == "fetch"
     assert plan_research[1].skill_input["from_search"] is True
+
+
+def test_planner_treats_repo_search_as_research_not_filesystem() -> None:
+    planner = Planner()
+
+    plan = planner.create_plan(
+        AgentRequest(
+            task="look for ai agents repo on github",
+            enabled_skills=["filesystem", "web_search", "fetch"],
+        )
+    )
+
+    assert len(plan) >= 2
+    assert plan[0].skill_name == "web_search"
+    assert plan[1].skill_name == "fetch"
 
 
 def test_filesystem_guardrails() -> None:
@@ -76,9 +173,7 @@ def test_fetch_skill_with_mocked_response(monkeypatch) -> None:
         class headers:
             @staticmethod
             def get(name: str, default: str = "") -> str:
-                if name == "Content-Type":
-                    return "text/plain"
-                return default
+                return "text/plain" if name == "Content-Type" else default
 
         def __enter__(self):
             return self
@@ -89,15 +184,10 @@ def test_fetch_skill_with_mocked_response(monkeypatch) -> None:
         def read(self, _size: int) -> bytes:
             return b"sample body"
 
-    def fake_urlopen(_request, timeout: float):
-        assert timeout > 0
-        return FakeResponse()
-
-    monkeypatch.setattr("skills.fetch.urlopen", fake_urlopen)
+    monkeypatch.setattr("skills.fetch.urlopen", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr("skills.fetch.socket.getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("93.184.216.34", 0))])
 
-    skill = FetchSkill()
-    result = skill.execute(SkillRequest(input={"url": "https://example.com"}))
+    result = FetchSkill().execute(SkillRequest(input={"url": "https://example.com"}))
     assert result.success is True
     assert "sample body" in result.output["text"]
 
@@ -111,23 +201,39 @@ def test_web_search_skill_deduplicates_results(monkeypatch) -> None:
     assert urls == ["https://example.com/a", "https://example.com/b"]
 
 
-def test_executor_multi_step_search_fetch(monkeypatch) -> None:
-    monkeypatch.setattr("skills.search_provider.socket.getaddrinfo", lambda *_args, **_kwargs: [])
+def test_planning_service_uses_provider_plan() -> None:
+    planning = PlanningService(provider_registry=None)
+    planning.provider_registry = type("StubRegistry", (), {"get": lambda _self, _name: StubPlanningAdapter(json.dumps({
+        "decision_summary": "search then fetch",
+        "steps": [
+            {"title": "Search web", "skill_name": "web_search", "skill_input": {"query": "latest docs"}, "decision_summary": "Need discovery"},
+            {"title": "Fetch result", "skill_name": "fetch", "skill_input": {"url": "https://example.com"}, "decision_summary": "Need source text"},
+        ],
+    }))})()
+    request = AgentRequest(
+        task="Find the latest docs",
+        provider="ollama",
+        model="stub-model",
+        execution_mode=ExecutionMode.MODEL_ASSISTED,
+        planning_skills=[
+            PlanningSkillDescriptor(name="web_search", runtime_type="native_python", description="Search", scopes=[], capability_categories=["web_search"], readiness="ready"),
+            PlanningSkillDescriptor(name="fetch", runtime_type="native_python", description="Fetch", scopes=[], capability_categories=["web_fetch"], readiness="ready"),
+        ],
+        budget=ExecutionBudget(),
+    )
+    outcome = planning.create_plan(request)
+    assert outcome.planning_source.value == "provider"
+    assert [step.skill_name for step in outcome.plan] == ["web_search", "fetch"]
 
-    class FakeFetchSkill(FetchSkill):
-        def execute(self, request: SkillRequest):
-            url = request.input["url"]
-            return super().execute(SkillRequest(input={"url": url}))
 
+def test_executor_budget_enforcement(monkeypatch) -> None:
     class FakeResponse:
         status = 200
 
         class headers:
             @staticmethod
             def get(name: str, default: str = "") -> str:
-                if name == "Content-Type":
-                    return "text/plain"
-                return default
+                return "text/plain" if name == "Content-Type" else default
 
         def __enter__(self):
             return self
@@ -136,22 +242,30 @@ def test_executor_multi_step_search_fetch(monkeypatch) -> None:
             return False
 
         def read(self, _size: int) -> bytes:
-            return b"fetched sample text"
+            return b"budgeted fetch"
 
     monkeypatch.setattr("skills.fetch.urlopen", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr("skills.fetch.socket.getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("93.184.216.34", 0))])
 
-    registry = SkillRegistry({"web_search": WebSearchSkill(resolver=StubSearchResolver()), "fetch": FakeFetchSkill()})
+    registry = SkillRegistry({"fetch": FetchSkill()})
     executor = Executor(registry)
-    steps = Planner().create_plan(AgentRequest(task="Research compare tools", enabled_skills=["web_search", "fetch"]))
-    result = executor.execute(context=RunContext(run_id=1), steps=steps, trace_collector=TraceCollector())
-    assert result.status.value == "completed"
-    assert result.execution_summary["evidence_items"] >= 2
+    state = executor.execute_steps(
+        context=RunContext(run_id=1),
+        steps=[
+            PlanStep(id="step-1", title="Fetch A", skill_name="fetch", skill_input={"url": "https://example.com/a"}),
+            PlanStep(id="step-2", title="Fetch B", skill_name="fetch", skill_input={"url": "https://example.com/b"}),
+        ],
+        trace_collector=TraceCollector(),
+        budget=ExecutionBudget(max_tool_invocations=1),
+        checkpoint=ExecutionState(),
+    )
+    assert state.budget_usage_summary["tool_invocations"] == 1
+    assert state.budget_usage_summary["budget_blocked"]
 
 
 def test_fallback_synthesis_uses_evidence() -> None:
-    engine = SynthesisEngine()
-    output, meta = engine.synthesize(
+    engine_instance = SynthesisEngine()
+    output, meta = engine_instance.synthesize(
         task="Compare options",
         provider="builtin",
         model="deterministic",
@@ -170,9 +284,162 @@ def test_fallback_synthesis_uses_evidence() -> None:
     assert "Source references" in output
 
 
-def test_run_execution_and_trace_routes(monkeypatch) -> None:
+def test_post_runs_returns_queued_and_worker_completes() -> None:
+    with TestClient(app) as client:
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Summarize README.md",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["filesystem"],
+            },
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        assert payload["run"]["status"] == "queued"
+        run = wait_for_status(client, payload["run"]["id"], {"completed", "failed"})
+        assert run["status"] in {"completed", "failed"}
+        trace = client.get(f"/runs/{payload['run']['id']}/trace").json()
+        event_types = [item["event_type"] for item in trace]
+        assert "run.queued" in event_types
+        assert "run.started" in event_types
+
+
+def test_approval_pause_and_resume() -> None:
+    script_path = Path(__file__).parent / "fixtures" / "mcp_echo_server.py"
+    manifest = _approval_manifest(script_path, "approval_resume_skill")
+
+    with TestClient(app) as client:
+        installed = client.post("/skills/install", json={"manifest": manifest.model_dump(mode="json")})
+        assert installed.status_code == 200
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Use skill approval_resume_skill to say hello",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["approval_resume_skill"],
+            },
+        )
+        assert created.status_code == 200
+        run_id = created.json()["run"]["id"]
+        waiting = wait_for_status(client, run_id, {"waiting_for_approval"})
+        assert waiting["pending_approval"] is not None
+
+        with Session(engine) as db:
+            persisted = get_run(db, run_id)
+            assert persisted is not None
+            assert persisted.execution_state["current_step_index"] == 0
+            assert persisted.execution_state["pending_approval_id"] == waiting["pending_approval"]["id"]
+
+        approved = client.post(f"/runs/{run_id}/approvals/{waiting['pending_approval']['id']}/approve")
+        assert approved.status_code == 200
+        final = wait_for_status(client, run_id, {"completed"})
+        assert final["status"] == "completed"
+        trace = client.get(f"/runs/{run_id}/trace").json()
+        event_types = [item["event_type"] for item in trace]
+        assert "approval.requested" in event_types
+        assert "run.paused" in event_types
+        assert "approval.resolved" in event_types
+        assert "run.resumed" in event_types
+
+
+def test_approval_deny_terminates_run() -> None:
+    script_path = Path(__file__).parent / "fixtures" / "mcp_echo_server.py"
+    manifest = _approval_manifest(script_path, "approval_deny_skill")
+
+    with TestClient(app) as client:
+        assert client.post("/skills/install", json={"manifest": manifest.model_dump(mode="json")}).status_code == 200
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Use skill approval_deny_skill to say hello",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["approval_deny_skill"],
+            },
+        )
+        run_id = created.json()["run"]["id"]
+        waiting = wait_for_status(client, run_id, {"waiting_for_approval"})
+        denied = client.post(f"/runs/{run_id}/approvals/{waiting['pending_approval']['id']}/deny")
+        assert denied.status_code == 200
+        failed = wait_for_status(client, run_id, {"failed"})
+        assert failed["status"] == "failed"
+
+
+def test_cancel_queued_run() -> None:
+    with TestClient(app) as client:
+        worker = client.app.state.run_worker
+        worker.stop()
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Summarize README.md",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["filesystem"],
+            },
+        )
+        assert created.status_code == 200
+        run_id = created.json()["run"]["id"]
+        cancelled = client.post(f"/runs/{run_id}/cancel")
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
+        worker.start()
+
+
+def test_cancel_waiting_run() -> None:
+    script_path = Path(__file__).parent / "fixtures" / "mcp_echo_server.py"
+    manifest = _approval_manifest(script_path, "approval_cancel_skill")
+
+    with TestClient(app) as client:
+        assert client.post("/skills/install", json={"manifest": manifest.model_dump(mode="json")}).status_code == 200
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Use skill approval_cancel_skill to say hello",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["approval_cancel_skill"],
+            },
+        )
+        run_id = created.json()["run"]["id"]
+        wait_for_status(client, run_id, {"waiting_for_approval"})
+        cancelled = client.post(f"/runs/{run_id}/cancel")
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
+
+
+def test_stream_returns_live_progress_events() -> None:
+    with TestClient(app) as client:
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Summarize README.md",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["filesystem"],
+            },
+        )
+        run_id = created.json()["run"]["id"]
+        wait_for_status(client, run_id, {"completed", "failed"})
+        with client.stream("GET", f"/runs/{run_id}/stream") as response:
+            body = "".join(chunk for chunk in response.iter_text())
+        assert '"type": "run"' in body
+        assert '"type": "trace"' in body
+
+
+def test_model_assisted_run_works_under_worker(monkeypatch) -> None:
     monkeypatch.setattr("skills.search_provider.socket.getaddrinfo", lambda *_args, **_kwargs: [])
     monkeypatch.setattr("skills.search_provider.DuckDuckGoInstantSearchProvider.search", lambda _self, request: SearchProviderResponse(query=request.query, results=[SearchResultItem(title="Demo", url="https://example.com/demo", snippet="demo snippet", rank=1)]))
+    monkeypatch.setattr("models.registry.ProviderRegistry.get", lambda _self, name: StubPlanningAdapter(json.dumps({
+        "decision_summary": "search then fetch",
+        "steps": [
+            {"title": "Search", "skill_name": "web_search", "skill_input": {"query": "python golang frameworks"}, "decision_summary": "Need candidates"},
+            {"title": "Fetch", "skill_name": "fetch", "skill_input": {"url": "https://example.com/demo"}, "decision_summary": "Need source"},
+        ],
+    })) if name == "ollama" else None)
 
     class FakeResponse:
         status = 200
@@ -180,9 +447,7 @@ def test_run_execution_and_trace_routes(monkeypatch) -> None:
         class headers:
             @staticmethod
             def get(name: str, default: str = "") -> str:
-                if name == "Content-Type":
-                    return "text/plain"
-                return default
+                return "text/plain" if name == "Content-Type" else default
 
         def __enter__(self):
             return self
@@ -197,38 +462,26 @@ def test_run_execution_and_trace_routes(monkeypatch) -> None:
     monkeypatch.setattr("skills.fetch.socket.getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("93.184.216.34", 0))])
 
     with TestClient(app) as client:
-        create_run = client.post(
+        created = client.post(
             "/runs",
             json={
                 "task": "Research compare python and golang web frameworks",
-                "provider": "builtin",
-                "model": "deterministic",
+                "provider": "ollama",
+                "model": "stub-model",
                 "enabled_skills": ["web_search", "fetch"],
-                "execute_now": True,
+                "execution_mode": "model_assisted",
             },
         )
-        assert create_run.status_code == 200
-        payload = create_run.json()
-        run_id = payload["run"]["id"]
-        assert payload["run"]["status"] in {"completed", "failed"}
-        assert payload["run"]["final_output"]
-        assert payload["run"]["synthesis_mode"] == "deterministic_fallback"
-        assert "evidence_summary" in payload["run"]
+        assert created.status_code == 200
+        run_id = created.json()["run"]["id"]
+        final = wait_for_status(client, run_id, {"completed", "failed"})
+        assert final["execution_mode"] == "model_assisted"
+        trace = client.get(f"/runs/{run_id}/trace").json()
+        event_types = [item["event_type"] for item in trace]
+        assert "planning.started" in event_types
+        assert "planning.completed" in event_types
 
-        get_run = client.get(f"/runs/{run_id}")
-        assert get_run.status_code == 200
-        assert "final_output" in get_run.json()
 
-        trace = client.get(f"/runs/{run_id}/trace")
-        assert trace.status_code == 200
-        event_types = [item["event_type"] for item in trace.json()]
-        assert "run.started" in event_types
-        assert "plan.created" in event_types
-        assert "tool.requested" in event_types
-        assert "synthesis.started" in event_types
-        assert "synthesis.completed" in event_types
-        assert event_types[-1] in {"run.completed", "run.failed"}
 
-        plan_event = next(item for item in trace.json() if item["event_type"] == "plan.created")
-        payload_data = json.loads(plan_event["payload"])
-        assert "plan" in payload_data
+
+

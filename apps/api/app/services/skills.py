@@ -8,10 +8,12 @@ from sqlmodel import Session as DBSession
 
 from app.config import settings
 from app.services.skill_config import SkillConfigError, SkillConfigService
+from core.contracts import PlanningSkillDescriptor
 from memory import skills as skill_repo
 from memory.models import SkillDefinition
 from skills import (
     MCPStdioSkill,
+    SkillCapabilityCategory,
     SkillManifest,
     SkillReadinessStatus,
     SkillRegistry,
@@ -163,7 +165,11 @@ class SkillCatalogService:
                     summary=str(exc),
                     readiness_status=SkillReadinessStatus(definition.readiness_status),
                     is_builtin=definition.is_builtin,
-                    metadata={"resolved_env_keys": [], "config_readiness": definition.readiness_status},
+                    metadata={
+                        "resolved_env_keys": [],
+                        "config_readiness": definition.readiness_status,
+                        "capability_categories": self._capability_category_values(manifest),
+                    },
                 )
                 continue
 
@@ -183,13 +189,43 @@ class SkillCatalogService:
                     manifest,
                     is_builtin=definition.is_builtin,
                     runtime_env=resolved.process_env,
-                    runtime_metadata=resolved.metadata,
+                    runtime_metadata={
+                        **resolved.metadata,
+                        "capability_categories": self._capability_category_values(manifest),
+                    },
                     redact_values=resolved.resolved_secret_values,
                 )
         return SkillRegistry(skills)
 
     def list_enabled_skill_names(self) -> list[str]:
         return [item.name for item in self.list_skills() if item.enabled]
+
+    def list_planning_skills(self, *, allowed_names: list[str] | None = None) -> list[PlanningSkillDescriptor]:
+        allowed = set(allowed_names or [])
+        descriptors: list[PlanningSkillDescriptor] = []
+        for skill in self.list_skills():
+            if not skill.enabled:
+                continue
+            if allowed and skill.name not in allowed:
+                continue
+            manifest = SkillManifest.model_validate(skill.manifest_json)
+            categories = self._capability_category_values(manifest)
+            if skill.readiness_status != SkillReadinessStatus.READY.value or not categories:
+                continue
+            approval_required = any(not item.read_only for item in manifest.capabilities)
+            descriptors.append(
+                PlanningSkillDescriptor(
+                    name=skill.name,
+                    runtime_type=skill.runtime_type,
+                    description=skill.description,
+                    scopes=list(skill.scopes or []),
+                    capability_categories=categories,
+                    readiness=skill.readiness_status,
+                    approval_required=approval_required,
+                    is_builtin=skill.is_builtin,
+                )
+            )
+        return descriptors
 
     def serialize_skill(self, skill: SkillDefinition) -> dict[str, Any]:
         skill = self._refresh_readiness(skill)
@@ -205,6 +241,7 @@ class SkillCatalogService:
             "is_builtin": skill.is_builtin,
             "scopes": list(skill.scopes or []),
             "tags": list(skill.tags or []),
+            "capability_categories": self._capability_category_values(manifest),
             "install_source": skill.install_source,
             "last_test_status": skill.last_test_status,
             "last_test_summary": skill.last_test_summary,
@@ -236,3 +273,11 @@ class SkillCatalogService:
         target = Path(manifest_path)
         payload = json.loads(target.read_text(encoding="utf-8"))
         return SkillManifest.model_validate(payload)
+
+    @staticmethod
+    def _capability_category_values(manifest: SkillManifest) -> list[str]:
+        if manifest.capability_categories:
+            return [item.value for item in manifest.capability_categories]
+        if manifest.capabilities:
+            return [SkillCapabilityCategory.CUSTOM_TOOL.value]
+        return []

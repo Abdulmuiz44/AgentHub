@@ -36,6 +36,16 @@ class SkillReadinessStatus(str, Enum):
     INVALID_CONFIG = "invalid_config"
 
 
+class SkillCapabilityCategory(str, Enum):
+    READ_FILES = "read_files"
+    WRITE_FILES = "write_files"
+    WEB_FETCH = "web_fetch"
+    WEB_SEARCH = "web_search"
+    RENDERED_BROWSE = "rendered_browse"
+    SHELL_VERIFY = "shell_verify"
+    CUSTOM_TOOL = "custom_tool"
+
+
 class SkillCapability(BaseModel):
     operation: str
     read_only: bool = True
@@ -91,6 +101,7 @@ class SkillManifest(BaseModel):
     scopes: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    capability_categories: list[SkillCapabilityCategory] = Field(default_factory=list)
     enabled_by_default: bool = True
     input_schema_summary: dict[str, Any] = Field(default_factory=dict)
     output_schema_summary: dict[str, Any] = Field(default_factory=dict)
@@ -183,6 +194,7 @@ class UnavailableSkill(Skill):
             status=SkillTestStatus.FAILED,
             summary=self.summary,
             metadata={
+                "builtin": self.is_builtin,
                 "config_readiness": self.readiness_status.value,
                 **self.metadata,
             },

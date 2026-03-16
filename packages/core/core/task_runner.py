@@ -1,28 +1,82 @@
-from .contracts import AgentRequest, EventType, RunContext, RunExecutionResult
+from .contracts import AgentRequest, EventType, RunContext
 from .executor import Executor
 from .planner import Planner
+from .planning_service import PlanningService
 from .synthesis import SynthesisEngine
 from .tracing import TraceCollector
 
 
 class TaskRunner:
-    def __init__(self, planner: Planner, executor: Executor, synthesis_engine: SynthesisEngine | None = None):
+    def __init__(
+        self,
+        planner: Planner,
+        executor: Executor,
+        synthesis_engine: SynthesisEngine | None = None,
+        planning_service: PlanningService | None = None,
+    ):
         self.planner = planner
         self.executor = executor
         self.synthesis_engine = synthesis_engine or SynthesisEngine()
+        self.planning_service = planning_service or PlanningService(planner=planner)
 
-    def run(self, request: AgentRequest, context: RunContext) -> tuple[RunExecutionResult, list]:
+    def run(self, request: AgentRequest, context: RunContext) -> tuple[object, list]:
         traces = TraceCollector()
-        traces.record_simple(context.run_id, EventType.RUN_STARTED, {"status": "running", "context": context.model_dump(mode="json")})
+        traces.record_simple(
+            context.run_id,
+            EventType.RUN_STARTED,
+            {"status": "running", "context": context.model_dump(mode="json"), "execution_mode": request.execution_mode.value},
+        )
+        traces.record_simple(
+            context.run_id,
+            EventType.PLANNING_STARTED,
+            {
+                "execution_mode": request.execution_mode.value,
+                "provider": request.provider,
+                "model": request.model,
+                "eligible_skills": [item.model_dump(mode="json") for item in request.planning_skills],
+            },
+        )
 
-        plan = self.planner.create_plan(request)
+        planning = self.planning_service.create_plan(request)
+        if planning.validation_error:
+            traces.record_simple(
+                context.run_id,
+                EventType.PLAN_VALIDATION_FAILED,
+                {"execution_mode": request.execution_mode.value, "error": planning.validation_error},
+            )
+        if planning.fallback_reason:
+            traces.record_simple(
+                context.run_id,
+                EventType.PLANNING_FALLBACK,
+                {
+                    "execution_mode": request.execution_mode.value,
+                    "fallback_reason": planning.fallback_reason,
+                    "planning_source": planning.planning_source.value,
+                },
+            )
         traces.record_simple(
             context.run_id,
             EventType.PLAN_CREATED,
-            {"plan": [item.model_dump(mode="json") for item in plan], "requested_skills": request.enabled_skills},
+            {
+                "plan": [item.model_dump(mode="json") for item in planning.plan],
+                "requested_skills": request.enabled_skills,
+                "execution_mode": request.execution_mode.value,
+                "planning_source": planning.planning_source.value,
+                "planning_summary": planning.planning_summary,
+                "fallback_reason": planning.fallback_reason,
+            },
         )
 
-        result = self.executor.execute(context=context, steps=plan, trace_collector=traces)
+        result = self.executor.execute(
+            context=context,
+            steps=planning.plan,
+            trace_collector=traces,
+            budget=request.budget,
+            execution_mode=request.execution_mode,
+            planning_source=planning.planning_source,
+            planning_summary=planning.planning_summary,
+            fallback_reason=planning.fallback_reason,
+        )
 
         traces.record_simple(
             context.run_id,

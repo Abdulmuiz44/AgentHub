@@ -22,15 +22,18 @@
 - Avoid speculative abstractions and advanced product surface.
 
 ## Runtime slice (current alpha)
-- Runs persist through SQLite-backed sessions, runs, traces, approvals, providers, and skill definitions.
-- Planner routing remains deterministic and supports explicit `Use skill <name>` routing for installed local skills.
-- Runtime executes native Python skills and MCP stdio-backed skills through one shared execution contract.
-- Skills are represented through a real local catalog with runtime type, manifest metadata, install source, readiness state, and last test status.
-- Skill manifests can declare typed config requirements through `config_fields`.
+- Runs persist through SQLite-backed sessions, runs, traces, approvals, providers, skill definitions, and per-skill config state.
+- `POST /runs` queues work for the local in-process worker instead of executing the whole run inline.
+- The worker lifecycle is bounded and local: queued -> running -> waiting_for_approval -> completed/failed/cancelled.
+- Deterministic and model-assisted planning are both preserved under the worker path.
+- Approval-gated steps pause the run, persist a checkpoint, and resume from stored state when approval is resolved.
+- Cancellation is cooperative and processed safely for queued, running, and waiting runs.
+- Run detail uses SSE to surface live progress without exposing hidden reasoning or secrets.
+- Skill routing remains bounded: deterministic heuristics plus explicit `Use skill <name>` routing, with optional bounded model-assisted planning.
+- Skill manifests can declare typed config requirements and planner-facing `capability_categories`.
 - Non-secret config values persist in SQLite; secret-like fields persist environment variable names only.
 - Runtime resolves secret bindings from process environment at test/execution time and fails safely when bindings or env values are missing.
-- MCP support is bounded to local stdio tool wrapping (`initialize`, `tools/list`, `tools/call`, clean shutdown) with safe env injection.
-- Skill APIs and UI redact resolved secret values and only expose binding/readiness state.
+- MCP support remains bounded to local stdio tool wrapping with safe env injection.
 
 ## Search configuration
 - Optional `AGENTHUB_SEARCH_PROVIDER` (`searxng`, `duckduckgo`, `duckduckgo_instant`).

@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     workspace_root: str = Field(default=".")
     search_provider: str | None = Field(default=None)
     searxng_base_url: str | None = Field(default=None)
+    cors_allowed_origins_csv: str = Field(default="http://localhost:3000,http://127.0.0.1:3000")
+
+    @property
+    def cors_allowed_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins_csv.split(",") if origin.strip()]
 
 
 settings = Settings()

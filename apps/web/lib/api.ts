@@ -5,6 +5,18 @@ export type CreateRunPayload = {
   session_id?: number;
   enabled_skills?: string[];
   execute_now?: boolean;
+  execution_mode?: "deterministic" | "model_assisted";
+};
+
+export type ApprovalResponse = {
+  id: number;
+  run_id: number;
+  step_id?: string | null;
+  reason: string;
+  status: string;
+  resolution_summary?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type RunResponse = {
@@ -13,13 +25,21 @@ export type RunResponse = {
   task: string;
   provider: string;
   model: string;
+  execution_mode: string;
+  planning_source: string;
+  planning_summary: string;
+  fallback_reason?: string | null;
   status: string;
+  cancel_requested: boolean;
   final_output?: string | null;
   synthesis_mode?: string | null;
   synthesis_status?: string | null;
   synthesis_error_summary?: string | null;
   execution_summary?: Record<string, unknown>;
   evidence_summary?: Record<string, unknown>;
+  budget_config?: Record<string, unknown>;
+  budget_usage_summary?: Record<string, unknown>;
+  pending_approval?: ApprovalResponse | null;
   created_at: string;
   updated_at: string;
 };
@@ -36,6 +56,15 @@ export type CreateRunResult = {
   run: RunResponse;
   trace_events: TraceResponse[];
 };
+
+export type ApprovalResolveResponse = {
+  run: RunResponse;
+  approval: ApprovalResponse;
+};
+
+export type StreamEnvelope =
+  | { type: "trace"; data: TraceResponse }
+  | { type: "run"; data: RunResponse };
 
 export type ProviderCapability = {
   name: string;
@@ -105,6 +134,7 @@ export type SkillResponse = {
   is_builtin: boolean;
   scopes: string[];
   tags: string[];
+  capability_categories: string[];
   install_source?: string | null;
   last_test_status?: string | null;
   last_test_summary?: string | null;
@@ -158,6 +188,34 @@ export async function createRun(payload: CreateRunPayload): Promise<CreateRunRes
     await readError(response, "Run creation failed");
   }
   return response.json();
+}
+
+export async function cancelRun(runId: number): Promise<RunResponse> {
+  const response = await fetch(`${API_BASE}/runs/${runId}/cancel`, { method: "POST" });
+  if (!response.ok) {
+    await readError(response, "Run cancellation failed");
+  }
+  return response.json();
+}
+
+export async function approveRunStep(runId: number, approvalId: number): Promise<ApprovalResolveResponse> {
+  const response = await fetch(`${API_BASE}/runs/${runId}/approvals/${approvalId}/approve`, { method: "POST" });
+  if (!response.ok) {
+    await readError(response, "Approval request failed");
+  }
+  return response.json();
+}
+
+export async function denyRunStep(runId: number, approvalId: number): Promise<ApprovalResolveResponse> {
+  const response = await fetch(`${API_BASE}/runs/${runId}/approvals/${approvalId}/deny`, { method: "POST" });
+  if (!response.ok) {
+    await readError(response, "Approval denial failed");
+  }
+  return response.json();
+}
+
+export function buildRunStreamUrl(runId: number): string {
+  return `${API_BASE}/runs/${runId}/stream`;
 }
 
 export async function listProviders(): Promise<ProviderSummary[]> {
