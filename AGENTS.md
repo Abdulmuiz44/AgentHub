@@ -1,4 +1,4 @@
-﻿# AgentHub Contributor Guide
+# AgentHub Contributor Guide
 
 ## Repo layout
 - `apps/api`: FastAPI service
@@ -23,11 +23,14 @@
 
 ## Runtime slice (current alpha)
 - Runs persist through SQLite-backed sessions, runs, traces, approvals, providers, and skill definitions.
-- Planner routing remains deterministic and now supports explicit `Use skill <name>` routing for installed local skills.
+- Planner routing remains deterministic and supports explicit `Use skill <name>` routing for installed local skills.
 - Runtime executes native Python skills and MCP stdio-backed skills through one shared execution contract.
-- Skills are represented through a real local catalog with runtime type, manifest metadata, install source, and last test status.
-- MCP support is bounded to local stdio tool wrapping (`initialize`, `tools/list`, `tools/call`, clean shutdown).
-- Skills can be installed from a local manifest, enabled or disabled, and tested through API and UI.
+- Skills are represented through a real local catalog with runtime type, manifest metadata, install source, readiness state, and last test status.
+- Skill manifests can declare typed config requirements through `config_fields`.
+- Non-secret config values persist in SQLite; secret-like fields persist environment variable names only.
+- Runtime resolves secret bindings from process environment at test/execution time and fails safely when bindings or env values are missing.
+- MCP support is bounded to local stdio tool wrapping (`initialize`, `tools/list`, `tools/call`, clean shutdown) with safe env injection.
+- Skill APIs and UI redact resolved secret values and only expose binding/readiness state.
 
 ## Search configuration
 - Optional `AGENTHUB_SEARCH_PROVIDER` (`searxng`, `duckduckgo`, `duckduckgo_instant`).
@@ -35,7 +38,7 @@
 - Default behavior uses SearxNG when configured, otherwise DuckDuckGo Instant API fallback.
 
 ## Repo hygiene
-- Temporary validation folders such as `.deps/`, `apps/api/.vendor/`, and `*.egg-info/` are ignored and should not be committed.
+- Temporary validation folders such as `.deps/`, `apps/api/.vendor/`, `.tmp/`, and `*.egg-info/` are ignored and should not be committed.
 
 ## Definition of done (small tasks)
 - API starts and health route responds.

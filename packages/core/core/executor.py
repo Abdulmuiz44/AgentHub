@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from .contracts import EvidenceBundle, EvidenceItem, EventType, PlanStep, RunContext, RunExecutionResult, RunStatus, StepExecutionResult
 from .tracing import TraceCollector
@@ -32,7 +32,7 @@ class Executor:
 
             skill = self.skill_registry.get_skill(step.skill_name)
             runtime_type = skill.manifest.runtime_type.value if skill is not None else "unknown"
-            is_builtin = bool(skill and "builtin" in skill.manifest.tags)
+            skill_metadata = self._skill_runtime_metadata(skill)
             trace_collector.record_simple(
                 context.run_id,
                 EventType.TOOL_REQUESTED,
@@ -40,15 +40,23 @@ class Executor:
                     "step_id": step.id,
                     "skill": step.skill_name,
                     "runtime_type": runtime_type,
-                    "is_builtin": is_builtin,
+                    "is_builtin": skill_metadata.get("builtin", False),
                     "selection_reason": step.selection_reason,
+                    "config_readiness": skill_metadata.get("config_readiness"),
+                    "resolved_env_keys": skill_metadata.get("resolved_env_keys", []),
                     "input": self._summarize_output(dynamic_input),
                 },
             )
             trace_collector.record_simple(
                 context.run_id,
                 EventType.TOOL_STARTED,
-                {"step_id": step.id, "skill": step.skill_name, "runtime_type": runtime_type, "is_builtin": is_builtin},
+                {
+                    "step_id": step.id,
+                    "skill": step.skill_name,
+                    "runtime_type": runtime_type,
+                    "is_builtin": skill_metadata.get("builtin", False),
+                    "config_readiness": skill_metadata.get("config_readiness"),
+                },
             )
 
             if step.skill_name == "fetch" and dynamic_input.get("from_search"):
@@ -88,7 +96,7 @@ class Executor:
                 trace_collector.record_simple(
                     context.run_id,
                     EventType.TOOL_FAILED,
-                    {"step_id": step.id, "skill": step.skill_name, "runtime_type": runtime_type, "is_builtin": is_builtin, "error": error},
+                    {"step_id": step.id, "skill": step.skill_name, "runtime_type": runtime_type, "is_builtin": False, "error": error},
                 )
                 continue
 
@@ -107,6 +115,8 @@ class Executor:
                         "skill": step.skill_name,
                         "runtime_type": result.runtime_type.value,
                         "is_builtin": result.metadata.get("builtin", False),
+                        "config_readiness": result.metadata.get("config_readiness"),
+                        "resolved_env_keys": result.metadata.get("resolved_env_keys", []),
                         "summary": result.summary,
                         "metadata": self._summarize_output(result.metadata),
                         "output": self._summarize_output(result.output),
@@ -124,6 +134,8 @@ class Executor:
                         "skill": step.skill_name,
                         "runtime_type": result.runtime_type.value,
                         "is_builtin": result.metadata.get("builtin", False),
+                        "config_readiness": result.metadata.get("config_readiness"),
+                        "resolved_env_keys": result.metadata.get("resolved_env_keys", []),
                         "metadata": self._summarize_output(result.metadata),
                         "error": result.error,
                     },
@@ -248,3 +260,17 @@ class Executor:
             else:
                 summary[key] = value
         return summary
+
+    @staticmethod
+    def _skill_runtime_metadata(skill: object | None) -> dict:
+        if skill is None:
+            return {}
+        if hasattr(skill, "runtime_metadata") and isinstance(getattr(skill, "runtime_metadata"), dict):
+            return dict(getattr(skill, "runtime_metadata"))
+        if hasattr(skill, "readiness_status"):
+            readiness = getattr(skill, "readiness_status")
+            return {
+                "config_readiness": getattr(readiness, "value", readiness),
+                "builtin": bool(getattr(skill, "is_builtin", False)),
+            }
+        return {"builtin": bool(getattr(skill, "is_builtin", False))}

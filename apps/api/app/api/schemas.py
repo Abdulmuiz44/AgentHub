@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -110,9 +110,43 @@ class SkillManifestPayload(BaseModel):
     input_schema_summary: dict[str, Any] = Field(default_factory=dict)
     output_schema_summary: dict[str, Any] = Field(default_factory=dict)
     capabilities: list[dict[str, Any]] = Field(default_factory=list)
+    config_fields: list[dict[str, Any]] = Field(default_factory=list)
     mcp_stdio: dict[str, Any] | None = None
     install_source: str | None = None
     test_input: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillConfigFieldResponse(BaseModel):
+    key: str
+    label: str | None = None
+    description: str | None = None
+    required: bool = False
+    secret: bool = False
+    value_type: str
+    default: Any | None = None
+    env_var_allowed: bool = False
+    example: str | None = None
+
+
+class SkillConfigValueResponse(BaseModel):
+    key: str
+    value: Any | None = None
+    configured: bool
+    secret_binding: str | None = None
+    uses_environment_binding: bool = False
+
+
+class SkillConfigStateResponse(BaseModel):
+    readiness_status: str
+    readiness_summary: str
+    values: list[SkillConfigValueResponse] = Field(default_factory=list)
+
+
+class SkillConfigResponse(BaseModel):
+    skill_name: str
+    config_schema: list[SkillConfigFieldResponse] = Field(default_factory=list)
+    state: SkillConfigStateResponse
+    updated_at: datetime | None = None
 
 
 class SkillResponse(BaseModel):
@@ -129,12 +163,21 @@ class SkillResponse(BaseModel):
     last_test_status: str | None = None
     last_test_summary: str | None = None
     last_tested_at: datetime | None = None
+    readiness_status: str
+    readiness_summary: str
+    config_schema: list[SkillConfigFieldResponse] = Field(default_factory=list)
+    config_state: SkillConfigStateResponse
     manifest: dict[str, Any] = Field(default_factory=dict)
 
 
 class SkillInstallRequest(BaseModel):
     manifest: SkillManifestPayload | None = None
     manifest_path: str | None = None
+
+
+class SkillConfigUpdateRequest(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)
+    secret_bindings: dict[str, str] = Field(default_factory=dict)
 
 
 class SkillTestResponse(BaseModel):

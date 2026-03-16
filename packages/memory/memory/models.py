@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import Column
@@ -55,10 +55,15 @@ class SkillDefinition(SQLModel, table=True):
     scopes: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     manifest_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    config_values_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    secret_bindings_json: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
+    readiness_status: str = "ready"
+    readiness_summary: str = "Ready"
     install_source: str | None = None
     last_test_status: str | None = None
     last_test_summary: str | None = None
     last_tested_at: datetime | None = None
+    config_updated_at: datetime | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

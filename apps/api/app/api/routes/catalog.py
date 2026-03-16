@@ -1,8 +1,9 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session as DBSession
 
-from app.api.schemas import SkillInstallRequest, SkillResponse, SkillTestResponse
+from app.api.schemas import SkillConfigResponse, SkillConfigUpdateRequest, SkillInstallRequest, SkillResponse, SkillTestResponse
 from app.db.session import get_session
+from app.services.skill_config import SkillConfigError
 from app.services.skills import SkillCatalogService
 from skills import SkillManifest
 
@@ -34,6 +35,27 @@ def get_skill(name: str, db: DBSession = Depends(get_session)) -> dict[str, obje
     skill = service.get_skill(name)
     if skill is None:
         raise HTTPException(status_code=404, detail="Skill not found")
+    return service.serialize_skill(skill)
+
+
+@router.get("/skills/{name}/config", response_model=SkillConfigResponse)
+def get_skill_config(name: str, db: DBSession = Depends(get_session)) -> dict[str, object]:
+    service = SkillCatalogService(db)
+    try:
+        return service.get_skill_config(name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+
+
+@router.post("/skills/{name}/config", response_model=SkillResponse)
+def update_skill_config(name: str, payload: SkillConfigUpdateRequest, db: DBSession = Depends(get_session)) -> dict[str, object]:
+    service = SkillCatalogService(db)
+    try:
+        skill = service.update_skill_config(name, values=payload.values, secret_bindings=payload.secret_bindings)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except SkillConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return service.serialize_skill(skill)
 
 

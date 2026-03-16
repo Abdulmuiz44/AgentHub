@@ -200,6 +200,7 @@ class SynthesisEngine:
     ) -> str:
         sources = [item for item in evidence.items if item.source_type in {"web_page", "search_result", "filesystem"}]
         comparisons = len({item.source_ref for item in sources}) > 1
+        failures = [item for item in step_results if not item.success]
         lines = [
             f"Task: {task}",
             f"Planned steps: {len(plan)}",
@@ -213,10 +214,15 @@ class SynthesisEngine:
                 "Compared evidence across multiple sources." if comparisons else "Collected evidence from available source(s)."
             )
             for item in sources[:6]:
-                label = item.title or item.source_ref
-                lines.append(f"- {label}: {item.excerpt[:180]}")
+                lines.append(f"- {item.title or item.source_ref}: {item.excerpt[:180]}")
         else:
             lines.append("No strong evidence collected. Output may be incomplete.")
+
+        if failures:
+            lines.append("")
+            lines.append("Step failures:")
+            for item in failures[:6]:
+                lines.append(f"- {item.step_id}: {item.summary}")
 
         if evidence.notes:
             lines.append("")

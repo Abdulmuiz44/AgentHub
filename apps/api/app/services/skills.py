@@ -1,24 +1,39 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from sqlmodel import Session as DBSession
 
 from app.config import settings
+from app.services.skill_config import SkillConfigError, SkillConfigService
 from memory import skills as skill_repo
 from memory.models import SkillDefinition
-from skills import SkillManifest, SkillRegistry, SkillRuntimeType, SkillTestResult, SkillTestStatus, builtin_manifests
+from skills import (
+    MCPStdioSkill,
+    SkillManifest,
+    SkillReadinessStatus,
+    SkillRegistry,
+    SkillTestResult,
+    SkillTestStatus,
+    UnavailableSkill,
+    builtin_manifests,
+)
+from skills.registry import builtin_skill_factories
 
 
 class SkillCatalogService:
     def __init__(self, db: DBSession) -> None:
         self.db = db
+        self.config_service = SkillConfigService()
 
     def ensure_catalog_seeded(self) -> None:
         for manifest in builtin_manifests():
             existing = skill_repo.get_skill_definition(self.db, manifest.name)
             enabled = existing.enabled if existing is not None else manifest.enabled_by_default
+            snapshot = self.config_service.snapshot_for_definition(existing) if existing is not None else self.config_service.validate_update(manifest, {}, {})
+            readiness_status, readiness_summary = self.config_service.evaluate_readiness(manifest, snapshot)
             skill_repo.upsert_skill_definition(
                 self.db,
                 name=manifest.name,
@@ -31,21 +46,30 @@ class SkillCatalogService:
                 tags=sorted(set(manifest.tags + ["builtin"])),
                 manifest_json=manifest.model_dump(mode="json"),
                 install_source="builtin",
+                config_values_json=snapshot.values,
+                secret_bindings_json=snapshot.secret_bindings,
+                readiness_status=readiness_status.value,
+                readiness_summary=readiness_summary,
             )
 
     def list_skills(self) -> list[SkillDefinition]:
         self.ensure_catalog_seeded()
-        return skill_repo.list_skill_definitions(self.db)
+        return [self._refresh_readiness(skill) for skill in skill_repo.list_skill_definitions(self.db)]
 
     def get_skill(self, name: str) -> SkillDefinition | None:
         self.ensure_catalog_seeded()
-        return skill_repo.get_skill_definition(self.db, name)
+        skill = skill_repo.get_skill_definition(self.db, name)
+        if skill is None:
+            return None
+        return self._refresh_readiness(skill)
 
     def install_skill(self, *, manifest: SkillManifest | None = None, manifest_path: str | None = None) -> SkillDefinition:
         self.ensure_catalog_seeded()
         resolved_manifest = manifest or self._load_manifest_from_path(manifest_path)
         if resolved_manifest is None:
             raise ValueError("A manifest payload or manifest_path is required")
+        snapshot = self.config_service.validate_update(resolved_manifest, {}, {})
+        readiness_status, readiness_summary = self.config_service.evaluate_readiness(resolved_manifest, snapshot)
         return skill_repo.upsert_skill_definition(
             self.db,
             name=resolved_manifest.name,
@@ -58,6 +82,10 @@ class SkillCatalogService:
             tags=resolved_manifest.tags,
             manifest_json=resolved_manifest.model_dump(mode="json"),
             install_source=resolved_manifest.install_source or manifest_path or "local_manifest",
+            config_values_json=snapshot.values,
+            secret_bindings_json=snapshot.secret_bindings,
+            readiness_status=readiness_status.value,
+            readiness_summary=readiness_summary,
         )
 
     def set_enabled(self, name: str, enabled: bool) -> SkillDefinition:
@@ -65,6 +93,35 @@ class SkillCatalogService:
         if skill is None:
             raise KeyError(name)
         return skill_repo.update_skill_definition(self.db, skill, enabled=enabled)
+
+    def get_skill_config(self, name: str) -> dict[str, Any]:
+        skill = self.get_skill(name)
+        if skill is None:
+            raise KeyError(name)
+        manifest = SkillManifest.model_validate(skill.manifest_json)
+        snapshot = self.config_service.snapshot_for_definition(skill)
+        return {
+            "skill_name": skill.name,
+            "config_schema": [field.model_dump(mode="json") for field in manifest.config_fields],
+            "state": self.config_service.redacted_config_response(manifest, snapshot),
+            "updated_at": skill.config_updated_at,
+        }
+
+    def update_skill_config(self, name: str, *, values: dict[str, Any], secret_bindings: dict[str, str]) -> SkillDefinition:
+        skill = self.get_skill(name)
+        if skill is None:
+            raise KeyError(name)
+        manifest = SkillManifest.model_validate(skill.manifest_json)
+        snapshot = self.config_service.validate_update(manifest, values, secret_bindings)
+        readiness_status, readiness_summary = self.config_service.evaluate_readiness(manifest, snapshot)
+        return skill_repo.update_skill_definition(
+            self.db,
+            skill,
+            config_values_json=snapshot.values,
+            secret_bindings_json=snapshot.secret_bindings,
+            readiness_status=readiness_status.value,
+            readiness_summary=readiness_summary,
+        )
 
     def test_skill(self, name: str) -> tuple[SkillDefinition, SkillTestResult]:
         skill_definition = self.get_skill(name)
@@ -76,6 +133,7 @@ class SkillCatalogService:
             result = SkillTestResult(status=SkillTestStatus.FAILED, summary="Skill could not be instantiated")
         else:
             result = skill.test()
+        skill_definition = self._refresh_readiness(skill_definition)
         skill_definition = skill_repo.update_skill_definition(
             self.db,
             skill_definition,
@@ -86,24 +144,57 @@ class SkillCatalogService:
         return skill_definition, result
 
     def build_registry(self, *, include_disabled: bool = False) -> SkillRegistry:
-        manifests: list[SkillManifest] = []
-        for definition in self.list_skills():
-            if not include_disabled and not definition.enabled:
-                continue
-            manifests.append(SkillManifest.model_validate(definition.manifest_json))
-        return SkillRegistry.from_manifests(
-            manifests,
+        skills: dict[str, Any] = {}
+        native_factories = builtin_skill_factories(
             workspace_root=settings.workspace_root,
             search_provider=settings.search_provider,
             searxng_base_url=settings.searxng_base_url,
         )
+        for definition in self.list_skills():
+            if not include_disabled and not definition.enabled:
+                continue
+            manifest = SkillManifest.model_validate(definition.manifest_json)
+            snapshot = self.config_service.snapshot_for_definition(definition)
+            try:
+                resolved = self.config_service.resolve_runtime_config(manifest, snapshot)
+            except SkillConfigError as exc:
+                skills[definition.name] = UnavailableSkill(
+                    manifest,
+                    summary=str(exc),
+                    readiness_status=SkillReadinessStatus(definition.readiness_status),
+                    is_builtin=definition.is_builtin,
+                    metadata={"resolved_env_keys": [], "config_readiness": definition.readiness_status},
+                )
+                continue
+
+            if manifest.runtime_type.value == "native_python":
+                factory = native_factories.get(manifest.name)
+                if factory is not None:
+                    skills[manifest.name] = factory()
+                else:
+                    skills[manifest.name] = UnavailableSkill(
+                        manifest,
+                        summary=f"Native skill implementation is unavailable for {manifest.name}",
+                        readiness_status=SkillReadinessStatus.INVALID_CONFIG,
+                        is_builtin=definition.is_builtin,
+                    )
+            elif manifest.runtime_type.value == "mcp_stdio":
+                skills[manifest.name] = MCPStdioSkill(
+                    manifest,
+                    is_builtin=definition.is_builtin,
+                    runtime_env=resolved.process_env,
+                    runtime_metadata=resolved.metadata,
+                    redact_values=resolved.resolved_secret_values,
+                )
+        return SkillRegistry(skills)
 
     def list_enabled_skill_names(self) -> list[str]:
         return [item.name for item in self.list_skills() if item.enabled]
 
-    @staticmethod
-    def serialize_skill(skill: SkillDefinition) -> dict:
+    def serialize_skill(self, skill: SkillDefinition) -> dict[str, Any]:
+        skill = self._refresh_readiness(skill)
         manifest = SkillManifest.model_validate(skill.manifest_json)
+        snapshot = self.config_service.snapshot_for_definition(skill)
         return {
             "id": skill.id,
             "name": skill.name,
@@ -118,8 +209,25 @@ class SkillCatalogService:
             "last_test_status": skill.last_test_status,
             "last_test_summary": skill.last_test_summary,
             "last_tested_at": skill.last_tested_at,
+            "readiness_status": skill.readiness_status,
+            "readiness_summary": skill.readiness_summary,
+            "config_schema": [field.model_dump(mode="json") for field in manifest.config_fields],
+            "config_state": self.config_service.redacted_config_response(manifest, snapshot),
             "manifest": manifest.model_dump(mode="json"),
         }
+
+    def _refresh_readiness(self, skill: SkillDefinition) -> SkillDefinition:
+        manifest = SkillManifest.model_validate(skill.manifest_json)
+        snapshot = self.config_service.snapshot_for_definition(skill)
+        readiness_status, readiness_summary = self.config_service.evaluate_readiness(manifest, snapshot)
+        if skill.readiness_status == readiness_status.value and skill.readiness_summary == readiness_summary:
+            return skill
+        return skill_repo.update_skill_definition(
+            self.db,
+            skill,
+            readiness_status=readiness_status.value,
+            readiness_summary=readiness_summary,
+        )
 
     @staticmethod
     def _load_manifest_from_path(manifest_path: str | None) -> SkillManifest | None:

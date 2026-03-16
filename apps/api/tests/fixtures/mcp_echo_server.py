@@ -1,4 +1,5 @@
-﻿import json
+import json
+import os
 import sys
 
 
@@ -48,10 +49,14 @@ while True:
         })
     elif method == "tools/call":
         arguments = message.get("params", {}).get("arguments", {})
+        secret_echo = os.environ.get("ECHO_API_KEY", "")
+        output = f"echo:{arguments.get('prompt') or arguments.get('task') or 'ok'}"
+        if arguments.get("include_secret"):
+            output = f"{output}:{secret_echo}"
         write_message({
             "jsonrpc": "2.0",
             "id": message.get("id"),
-            "result": {"content": [{"type": "text", "text": f"echo:{arguments.get('prompt') or arguments.get('task') or 'ok'}"}]},
+            "result": {"content": [{"type": "text", "text": output}]},
         })
     elif method == "shutdown":
         write_message({"jsonrpc": "2.0", "id": message.get("id"), "result": {}})

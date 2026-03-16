@@ -1,4 +1,4 @@
-﻿from collections.abc import Iterator
+from collections.abc import Iterator
 from pathlib import Path
 import sqlite3
 
@@ -20,10 +20,15 @@ SKILL_COLUMN_MIGRATIONS = {
     "scopes": "JSON DEFAULT '[]'",
     "tags": "JSON DEFAULT '[]'",
     "manifest_json": "JSON DEFAULT '{}'",
+    "config_values_json": "JSON DEFAULT '{}'",
+    "secret_bindings_json": "JSON DEFAULT '{}'",
+    "readiness_status": "TEXT DEFAULT 'ready'",
+    "readiness_summary": "TEXT DEFAULT 'Ready'",
     "install_source": "TEXT",
     "last_test_status": "TEXT",
     "last_test_summary": "TEXT",
     "last_tested_at": "TIMESTAMP",
+    "config_updated_at": "TIMESTAMP",
     "created_at": "TIMESTAMP",
     "updated_at": "TIMESTAMP",
 }

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -15,13 +15,15 @@ class MCPProtocolError(RuntimeError):
 
 
 class _MCPConnection:
-    def __init__(self, manifest: SkillManifest) -> None:
+    def __init__(self, manifest: SkillManifest, runtime_env: dict[str, str] | None = None) -> None:
         if manifest.mcp_stdio is None:
             raise MCPProtocolError("Missing MCP stdio configuration")
         self.manifest = manifest
         self.config = manifest.mcp_stdio
         env = os.environ.copy()
         process_env = {key: env[key] for key in self.config.env_var_refs if key in env}
+        if runtime_env:
+            process_env.update(runtime_env)
         self.process = subprocess.Popen(  # noqa: S603
             [self.config.command, *self.config.args],
             stdin=subprocess.PIPE,
@@ -132,23 +134,34 @@ class _MCPConnection:
 
 
 class MCPStdioSkill(Skill):
-    def __init__(self, manifest: SkillManifest, *, is_builtin: bool = False) -> None:
+    def __init__(
+        self,
+        manifest: SkillManifest,
+        *,
+        is_builtin: bool = False,
+        runtime_env: dict[str, str] | None = None,
+        runtime_metadata: dict[str, Any] | None = None,
+        redact_values: list[str] | None = None,
+    ) -> None:
         if manifest.runtime_type != SkillRuntimeType.MCP_STDIO:
             raise ValueError("MCPStdioSkill requires an mcp_stdio manifest")
         self.manifest = manifest
         self.is_builtin = is_builtin
+        self.runtime_env = runtime_env or {}
+        self.runtime_metadata = runtime_metadata or {}
+        self.redact_values = [item for item in (redact_values or []) if item]
 
     def execute(self, request: SkillRequest) -> SkillResult:
         if self.manifest.mcp_stdio is None:
-            return SkillResult(success=False, error="Missing MCP stdio configuration", runtime_type=self.manifest.runtime_type, skill_name=self.manifest.name, metadata={"builtin": self.is_builtin})
+            return SkillResult(success=False, error="Missing MCP stdio configuration", runtime_type=self.manifest.runtime_type, skill_name=self.manifest.name, metadata=self._metadata())
 
         tool_name = self.manifest.mcp_stdio.tool_name or request.operation or self.manifest.name
-        connection = _MCPConnection(self.manifest)
+        connection = _MCPConnection(self.manifest, runtime_env=self.runtime_env)
         try:
             initialize_result = connection.initialize()
             tools = connection.list_tools()
             response = connection.call_tool(tool_name, request.input, timeout=request.timeout_seconds)
-            output = self._normalize_tool_output(response)
+            output = self._redact(self._normalize_tool_output(response))
             output.setdefault("runtime_type", self.manifest.runtime_type.value)
             return SkillResult(
                 success=True,
@@ -156,15 +169,15 @@ class MCPStdioSkill(Skill):
                 summary=f"MCP tool {tool_name} completed",
                 runtime_type=self.manifest.runtime_type,
                 skill_name=self.manifest.name,
-                metadata={"builtin": self.is_builtin, "tool_name": tool_name, "tool_count": len(tools), "server": initialize_result.get("serverInfo", {})},
+                metadata={**self._metadata(), "tool_name": tool_name, "tool_count": len(tools), "server": initialize_result.get("serverInfo", {})},
             )
         except Exception as exc:  # noqa: BLE001
-            return SkillResult(success=False, error=str(exc), runtime_type=self.manifest.runtime_type, skill_name=self.manifest.name, metadata={"builtin": self.is_builtin, "tool_name": tool_name})
+            return SkillResult(success=False, error=self._redact(str(exc)), runtime_type=self.manifest.runtime_type, skill_name=self.manifest.name, metadata={**self._metadata(), "tool_name": tool_name})
         finally:
             connection.shutdown()
 
     def test(self) -> SkillTestResult:
-        connection = _MCPConnection(self.manifest)
+        connection = _MCPConnection(self.manifest, runtime_env=self.runtime_env)
         try:
             initialize_result = connection.initialize()
             tools = connection.list_tools()
@@ -175,11 +188,18 @@ class MCPStdioSkill(Skill):
                 summary = f"MCP server started and test call to {tool_name} succeeded"
             else:
                 summary = "MCP server started and tools were discovered"
-            return SkillTestResult(status=SkillTestStatus.PASSED, summary=summary, metadata={"tool_count": len(tools), "server": initialize_result.get("serverInfo", {})})
+            return SkillTestResult(status=SkillTestStatus.PASSED, summary=summary, metadata={**self._metadata(), "tool_count": len(tools), "server": initialize_result.get("serverInfo", {})})
         except Exception as exc:  # noqa: BLE001
-            return SkillTestResult(status=SkillTestStatus.FAILED, summary=str(exc))
+            return SkillTestResult(status=SkillTestStatus.FAILED, summary=self._redact(str(exc)), metadata=self._metadata())
         finally:
             connection.shutdown()
+
+    def _metadata(self) -> dict[str, Any]:
+        return {
+            "builtin": self.is_builtin,
+            **self.runtime_metadata,
+            "resolved_env_keys": sorted(self.runtime_env.keys()),
+        }
 
     @staticmethod
     def _normalize_tool_output(response: dict[str, Any]) -> dict[str, Any]:
@@ -193,3 +213,17 @@ class MCPStdioSkill(Skill):
         if isinstance(content, dict):
             return content
         return {"result": response}
+
+    def _redact(self, value: Any) -> Any:
+        if not self.redact_values:
+            return value
+        if isinstance(value, str):
+            redacted = value
+            for secret in self.redact_values:
+                redacted = redacted.replace(secret, "[redacted]")
+            return redacted
+        if isinstance(value, dict):
+            return {key: self._redact(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._redact(item) for item in value]
+        return value

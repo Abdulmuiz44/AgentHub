@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -21,16 +21,60 @@ class SkillTestStatus(str, Enum):
     FAILED = "failed"
 
 
+class SkillConfigValueType(str, Enum):
+    STRING = "string"
+    INTEGER = "integer"
+    NUMBER = "number"
+    BOOLEAN = "boolean"
+    PATH = "path"
+
+
+class SkillReadinessStatus(str, Enum):
+    READY = "ready"
+    MISSING_REQUIRED_CONFIG = "missing_required_config"
+    MISSING_REQUIRED_ENV_BINDING = "missing_required_env_binding"
+    INVALID_CONFIG = "invalid_config"
+
+
 class SkillCapability(BaseModel):
     operation: str
     read_only: bool = True
     description: str | None = None
 
 
+class SkillConfigField(BaseModel):
+    key: str
+    label: str | None = None
+    description: str | None = None
+    required: bool = False
+    secret: bool = False
+    value_type: SkillConfigValueType = SkillConfigValueType.STRING
+    default: Any | None = None
+    env_var_allowed: bool = False
+    example: str | None = None
+
+    @field_validator("key")
+    @classmethod
+    def validate_key(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Config field key is required")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_secret_defaults(self) -> "SkillConfigField":
+        if self.secret and self.default is not None:
+            raise ValueError("Secret config fields cannot declare default values")
+        if self.secret and not self.env_var_allowed:
+            self.env_var_allowed = True
+        return self
+
+
 class MCPStdioConfig(BaseModel):
     command: str
     args: list[str] = Field(default_factory=list)
     env_var_refs: list[str] = Field(default_factory=list)
+    env_map: dict[str, str] = Field(default_factory=dict)
     working_directory: str | None = None
     startup_timeout_seconds: float = Field(default=5.0, ge=0.5, le=30.0)
     call_timeout_seconds: float = Field(default=10.0, ge=0.5, le=120.0)
@@ -51,6 +95,7 @@ class SkillManifest(BaseModel):
     input_schema_summary: dict[str, Any] = Field(default_factory=dict)
     output_schema_summary: dict[str, Any] = Field(default_factory=dict)
     capabilities: list[SkillCapability] = Field(default_factory=list)
+    config_fields: list[SkillConfigField] = Field(default_factory=list)
     mcp_stdio: MCPStdioConfig | None = None
     install_source: str | None = None
     test_input: dict[str, Any] = Field(default_factory=dict)
@@ -101,3 +146,44 @@ class Skill(ABC):
 
     def test(self) -> SkillTestResult:
         return SkillTestResult(status=SkillTestStatus.PASSED, summary=f"{self.manifest.name} is available")
+
+
+class UnavailableSkill(Skill):
+    def __init__(
+        self,
+        manifest: SkillManifest,
+        *,
+        summary: str,
+        readiness_status: SkillReadinessStatus,
+        is_builtin: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.manifest = manifest
+        self.summary = summary
+        self.readiness_status = readiness_status
+        self.is_builtin = is_builtin
+        self.metadata = metadata or {}
+
+    def execute(self, request: SkillRequest) -> SkillResult:
+        return SkillResult(
+            success=False,
+            error=self.summary,
+            summary=self.summary,
+            runtime_type=self.manifest.runtime_type,
+            skill_name=self.manifest.name,
+            metadata={
+                "builtin": self.is_builtin,
+                "config_readiness": self.readiness_status.value,
+                **self.metadata,
+            },
+        )
+
+    def test(self) -> SkillTestResult:
+        return SkillTestResult(
+            status=SkillTestStatus.FAILED,
+            summary=self.summary,
+            metadata={
+                "config_readiness": self.readiness_status.value,
+                **self.metadata,
+            },
+        )

@@ -1,4 +1,18 @@
-﻿from .base import MCPStdioConfig, Skill, SkillManifest, SkillRequest, SkillResult, SkillRuntimeType, SkillTestResult, SkillTestStatus
+from .base import (
+    MCPStdioConfig,
+    Skill,
+    SkillCapability,
+    SkillConfigField,
+    SkillConfigValueType,
+    SkillManifest,
+    SkillReadinessStatus,
+    SkillRequest,
+    SkillResult,
+    SkillRuntimeType,
+    SkillTestResult,
+    SkillTestStatus,
+    UnavailableSkill,
+)
 from .fetch import FetchSkill
 from .filesystem import FilesystemSkill
 from .mcp_stdio import MCPStdioSkill
@@ -7,12 +21,17 @@ from .web_search import WebSearchSkill
 
 __all__ = [
     "Skill",
+    "SkillCapability",
+    "SkillConfigField",
+    "SkillConfigValueType",
     "SkillManifest",
+    "SkillReadinessStatus",
     "SkillRequest",
     "SkillResult",
     "SkillRuntimeType",
     "SkillTestResult",
     "SkillTestStatus",
+    "UnavailableSkill",
     "MCPStdioConfig",
     "FilesystemSkill",
     "FetchSkill",
