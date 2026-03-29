@@ -8,7 +8,7 @@ from typing import Any
 from models.base import ProviderGenerationRequest, ProviderGenerationSettings, ProviderMessage
 from models.registry import ProviderRegistry
 
-from .contracts import AgentRequest, ExecutionMode, PlanStep, PlanningSource
+from .contracts import AgentRequest, ExecutionMode, MutationApplyMode, PlanStep, PlanningSource
 from .planner import Planner
 
 
@@ -181,7 +181,7 @@ class PlanningService:
             descriptor = descriptors[step.skill_name]
             if descriptor.readiness != "ready":
                 return f"Provider selected not-ready skill: {step.skill_name}"
-            if descriptor.approval_required:
+            if descriptor.approval_required and request.mutation_apply_mode != MutationApplyMode.REVIEW_FIRST:
                 return f"Provider selected approval-gated skill: {step.skill_name}"
             if not descriptor.capability_categories:
                 return f"Provider selected skill without capability metadata: {step.skill_name}"
@@ -220,3 +220,5 @@ class PlanningService:
             return f"{source.value} planning produced no executable steps"
         unique_skills = ", ".join(dict.fromkeys(skill_names))
         return f"{source.value} planning selected {len(plan)} step(s) using: {unique_skills}"
+
+

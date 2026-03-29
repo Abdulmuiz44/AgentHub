@@ -6,6 +6,7 @@ export type CreateRunPayload = {
   enabled_skills?: string[];
   execute_now?: boolean;
   execution_mode?: "deterministic" | "model_assisted";
+  mutation_apply_mode?: "direct_apply" | "review_first";
 };
 
 export type ApprovalResponse = {
@@ -19,6 +20,33 @@ export type ApprovalResponse = {
   updated_at: string;
 };
 
+export type ChangeFileResponse = {
+  id: number;
+  path: string;
+  operation: string;
+  before_checksum?: string | null;
+  after_checksum?: string | null;
+  before_preview?: string | null;
+  after_preview?: string | null;
+  diff_preview: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChangeSetResponse = {
+  id: number;
+  run_id: number;
+  status: string;
+  change_count: number;
+  summary: string;
+  apply_summary?: string | null;
+  reject_summary?: string | null;
+  failure_summary?: string | null;
+  created_at: string;
+  updated_at: string;
+  files: ChangeFileResponse[];
+};
+
 export type RunResponse = {
   id: number;
   session_id: number;
@@ -26,11 +54,16 @@ export type RunResponse = {
   provider: string;
   model: string;
   execution_mode: string;
+  mutation_apply_mode: string;
   planning_source: string;
   planning_summary: string;
   fallback_reason?: string | null;
   status: string;
   cancel_requested: boolean;
+  pending_change_count: number;
+  review_status: string;
+  apply_summary?: string | null;
+  reject_summary?: string | null;
   final_output?: string | null;
   synthesis_mode?: string | null;
   synthesis_status?: string | null;
@@ -60,6 +93,11 @@ export type CreateRunResult = {
 export type ApprovalResolveResponse = {
   run: RunResponse;
   approval: ApprovalResponse;
+};
+
+export type RunChangeActionResponse = {
+  run: RunResponse;
+  change_set: ChangeSetResponse;
 };
 
 export type StreamEnvelope =
@@ -179,38 +217,44 @@ async function readError(response: Response, fallback: string): Promise<never> {
 }
 
 export async function createRun(payload: CreateRunPayload): Promise<CreateRunResult> {
-  const response = await fetch(`${API_BASE}/runs`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    await readError(response, "Run creation failed");
-  }
+  const response = await fetch(`${API_BASE}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (!response.ok) await readError(response, "Run creation failed");
   return response.json();
 }
 
 export async function cancelRun(runId: number): Promise<RunResponse> {
   const response = await fetch(`${API_BASE}/runs/${runId}/cancel`, { method: "POST" });
-  if (!response.ok) {
-    await readError(response, "Run cancellation failed");
-  }
+  if (!response.ok) await readError(response, "Run cancellation failed");
   return response.json();
 }
 
 export async function approveRunStep(runId: number, approvalId: number): Promise<ApprovalResolveResponse> {
   const response = await fetch(`${API_BASE}/runs/${runId}/approvals/${approvalId}/approve`, { method: "POST" });
-  if (!response.ok) {
-    await readError(response, "Approval request failed");
-  }
+  if (!response.ok) await readError(response, "Approval request failed");
   return response.json();
 }
 
 export async function denyRunStep(runId: number, approvalId: number): Promise<ApprovalResolveResponse> {
   const response = await fetch(`${API_BASE}/runs/${runId}/approvals/${approvalId}/deny`, { method: "POST" });
-  if (!response.ok) {
-    await readError(response, "Approval denial failed");
-  }
+  if (!response.ok) await readError(response, "Approval denial failed");
+  return response.json();
+}
+
+export async function fetchRunChanges(runId: number): Promise<ChangeSetResponse[]> {
+  const response = await fetch(`${API_BASE}/runs/${runId}/changes`, { cache: "no-store" });
+  if (!response.ok) await readError(response, "Run changes request failed");
+  return response.json();
+}
+
+export async function applyRunChanges(runId: number): Promise<RunChangeActionResponse> {
+  const response = await fetch(`${API_BASE}/runs/${runId}/apply`, { method: "POST" });
+  if (!response.ok) await readError(response, "Run apply request failed");
+  return response.json();
+}
+
+export async function rejectRunChanges(runId: number): Promise<RunChangeActionResponse> {
+  const response = await fetch(`${API_BASE}/runs/${runId}/reject`, { method: "POST" });
+  if (!response.ok) await readError(response, "Run reject request failed");
   return response.json();
 }
 
@@ -220,105 +264,69 @@ export function buildRunStreamUrl(runId: number): string {
 
 export async function listProviders(): Promise<ProviderSummary[]> {
   const response = await fetch(`${API_BASE}/providers`, { cache: "no-store" });
-  if (!response.ok) {
-    await readError(response, "Provider list request failed");
-  }
+  if (!response.ok) await readError(response, "Provider list request failed");
   return response.json();
 }
 
 export async function listProviderModels(provider: string): Promise<ProviderModelsItem> {
   const response = await fetch(`${API_BASE}/providers/models?provider=${encodeURIComponent(provider)}`, { cache: "no-store" });
-  if (!response.ok) {
-    await readError(response, "Provider models request failed");
-  }
+  if (!response.ok) await readError(response, "Provider models request failed");
   const payload: ProviderModelsResponse = await response.json();
   const providerMatch = payload.providers.find((item) => item.provider_name === provider);
-  if (!providerMatch) {
-    throw new Error(`Provider not found: ${provider}`);
-  }
+  if (!providerMatch) throw new Error(`Provider not found: ${provider}`);
   return providerMatch;
 }
 
 export async function checkProviderHealth(provider: string): Promise<ProviderHealthResponse> {
-  const response = await fetch(`${API_BASE}/providers/health-check`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider }),
-  });
-  if (!response.ok) {
-    await readError(response, "Provider health check request failed");
-  }
+  const response = await fetch(`${API_BASE}/providers/health-check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider }) });
+  if (!response.ok) await readError(response, "Provider health check request failed");
   return response.json();
 }
 
 export async function fetchRunDetail(runId: number): Promise<RunResponse> {
   const response = await fetch(`${API_BASE}/runs/${runId}`, { cache: "no-store" });
-  if (!response.ok) {
-    await readError(response, "Run detail request failed");
-  }
+  if (!response.ok) await readError(response, "Run detail request failed");
   return response.json();
 }
 
 export async function fetchRunTrace(runId: number): Promise<TraceResponse[]> {
   const response = await fetch(`${API_BASE}/runs/${runId}/trace`, { cache: "no-store" });
-  if (!response.ok) {
-    await readError(response, "Run trace request failed");
-  }
+  if (!response.ok) await readError(response, "Run trace request failed");
   return response.json();
 }
 
 export async function listSkills(): Promise<SkillResponse[]> {
   const response = await fetch(`${API_BASE}/skills`, { cache: "no-store" });
-  if (!response.ok) {
-    await readError(response, "Skill list request failed");
-  }
+  if (!response.ok) await readError(response, "Skill list request failed");
   return response.json();
 }
 
 export async function getSkillConfig(name: string): Promise<SkillConfigResponse> {
   const response = await fetch(`${API_BASE}/skills/${encodeURIComponent(name)}/config`, { cache: "no-store" });
-  if (!response.ok) {
-    await readError(response, "Skill config request failed");
-  }
+  if (!response.ok) await readError(response, "Skill config request failed");
   return response.json();
 }
 
 export async function installSkill(payload: SkillInstallPayload): Promise<SkillResponse> {
-  const response = await fetch(`${API_BASE}/skills/install`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    await readError(response, "Skill install request failed");
-  }
+  const response = await fetch(`${API_BASE}/skills/install`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (!response.ok) await readError(response, "Skill install request failed");
   return response.json();
 }
 
 export async function updateSkillConfig(name: string, payload: SkillConfigUpdatePayload): Promise<SkillResponse> {
-  const response = await fetch(`${API_BASE}/skills/${encodeURIComponent(name)}/config`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    await readError(response, "Skill config update request failed");
-  }
+  const response = await fetch(`${API_BASE}/skills/${encodeURIComponent(name)}/config`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (!response.ok) await readError(response, "Skill config update request failed");
   return response.json();
 }
 
 export async function setSkillEnabled(name: string, enabled: boolean): Promise<SkillResponse> {
   const response = await fetch(`${API_BASE}/skills/${encodeURIComponent(name)}/${enabled ? "enable" : "disable"}`, { method: "POST" });
-  if (!response.ok) {
-    await readError(response, "Skill enable/disable request failed");
-  }
+  if (!response.ok) await readError(response, "Skill enable/disable request failed");
   return response.json();
 }
 
 export async function testSkill(name: string): Promise<SkillTestResponse> {
   const response = await fetch(`${API_BASE}/skills/${encodeURIComponent(name)}/test`, { method: "POST" });
-  if (!response.ok) {
-    await readError(response, "Skill test request failed");
-  }
+  if (!response.ok) await readError(response, "Skill test request failed");
   return response.json();
 }

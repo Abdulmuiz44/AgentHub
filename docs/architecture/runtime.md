@@ -1,14 +1,14 @@
 # Runtime Architecture (Async Local Worker Slice)
 
 ## Components
-- **API (`apps/api`)**: creates queued runs, exposes run/trace/stream/cancel/approval routes, and exposes typed skill catalog/install/config/enable/disable/test routes.
+- **API (`apps/api`)**: creates queued runs, exposes run/trace/stream/cancel/approval/change-review routes, and exposes typed skill catalog/install/config/enable/disable/test routes.
 - **Run worker (`apps/api/app/services/worker.py`)**: single local in-process worker that dequeues runs, resumes incomplete queued work on startup, and executes one run at a time.
-- **Runtime service (`apps/api/app/services/runtime.py`)**: owns queued-run creation, checkpoint persistence, planning, approval pause/resume, cancellation handling, synthesis finalization, and run serialization.
+- **Runtime service (`apps/api/app/services/runtime.py`)**: owns queued-run creation, checkpoint persistence, planning, approval pause/resume, review-first proposal capture, apply/reject flows, synthesis finalization, and run serialization.
+- **Change review service (`apps/api/app/services/change_review.py`)**: normalizes proposed file changes, generates compact unified diffs, validates workspace safety, and applies or rejects persisted change sets.
 - **Core (`packages/core`)**: deterministic planner, bounded provider-assisted planning service, shared executor, evidence aggregation, synthesis engine, and runtime contracts.
-- **Skill catalog service (`apps/api/app/services/skills.py`)**: seeds built-ins, persists local skill definitions, validates readiness, exposes planner-facing eligible skills, tests skills, and builds runtime registries.
-- **Memory (`packages/memory`)**: SQLModel entities and SQLite repositories for sessions, runs, traces, approvals, providers, and skill definitions/config state.
+- **Memory (`packages/memory`)**: SQLModel entities and SQLite repositories for sessions, runs, traces, approvals, providers, skill definitions, and review-first change artifacts.
 - **Skills (`packages/skills`)**: shared manifest spec, native built-in skills, MCP stdio wrapper, and unified skill registry.
-- **Web (`apps/web`)**: dashboard, live run detail UI, and a practical skills management page.
+- **Web (`apps/web`)**: dashboard, live run detail UI, change review/apply/reject controls, and a practical skills management page.
 
 ## Run flow
 1. `POST /runs` persists a queued run and an initial compact `execution_state` checkpoint.
@@ -19,9 +19,9 @@
 4. The worker persists the selected plan and planning metadata to the run checkpoint.
 5. The executor runs one bounded step at a time, updating checkpointed progress after each step.
 6. If the next step requires approval, the worker creates or reuses an approval record, marks the run `waiting_for_approval`, emits pause traces, and exits cleanly.
-7. Approval resolution re-enqueues the run; the worker reloads the checkpoint and resumes from the stored step index.
-8. If cancellation is requested, the worker stops at the next safe boundary and marks the run `cancelled`.
-9. After all steps complete, the runtime performs synthesis and persists the terminal run state.
+7. Review-first mutation steps execute in proposal mode after approval, persist a change set plus per-file diff previews, and transition the run to `waiting_for_review`.
+8. `POST /runs/{id}/apply` revalidates workspace safety and writes the proposed files only if the stored base state still matches.
+9. `POST /runs/{id}/reject` preserves the change history and resolves the run without writing files.
 10. `GET /runs/{id}/stream` exposes compact SSE envelopes for trace and run updates.
 
 ## Run lifecycle
@@ -30,96 +30,69 @@ Current persisted statuses:
 - `queued`
 - `running`
 - `waiting_for_approval`
+- `waiting_for_review`
 - `completed`
 - `failed`
 - `cancelled`
 
 Related persisted run metadata includes:
 - `execution_mode`
+- `mutation_apply_mode`
 - `planning_source`
 - `planning_summary`
 - `fallback_reason`
+- `pending_change_count`
+- `review_status`
+- `apply_summary`
+- `reject_summary`
 - `budget_config`
 - `budget_usage_summary`
 - `execution_state`
 - `cancel_requested`
 
-## Execution checkpoint model
-`execution_state` is a compact JSON checkpoint containing:
-- enabled skills for the run
-- bounded budget config
-- current plan
-- current step index
-- accumulated step results
-- evidence bundle summary state
-- working search results for fetch-from-search continuation
-- planning source/summary/fallback metadata
-- budget usage summary
-- pending approval id if paused
-- failure context if present
+## Review-first change artifacts
+A review-first mutation run stores:
+- one change set record for the pending proposal batch
+- one change-file record per affected path
+- operation type (`create`, `overwrite`, `append` when supplied)
+- pre-change checksum or file absence expectation
+- post-change checksum
+- compact before/after previews
+- capped unified diff preview
+- apply/reject/failure summaries
 
-This state is sufficient for:
-- approval pause/resume
-- cancellation at safe boundaries
-- restart recovery for queued/running runs that can be safely re-queued
+This keeps the review surface inspectable without storing large duplicate blobs in traces.
 
-## Approvals
-Approval support is now first-class in the worker lifecycle.
+## Workspace safety checks
+Apply is bounded and fails safely when:
+- a proposed path escapes the configured workspace root
+- a target is not a UTF-8 text file
+- the current file content no longer matches the stored pre-change checksum or absence expectation
 
-When a selected step is approval-gated:
-- an approval record is created or reused
-- the run status becomes `waiting_for_approval`
-- the checkpoint stores the pending approval id
-- `approval.requested` and `run.paused` traces are emitted
-
-When approval is resolved:
-- `approval.resolved` is traced
-- approved runs emit `run.resumed` and continue from the stored step index
-- denied runs terminate clearly with `run.failed`
-
-## Cancellation
-Cancellation remains cooperative and bounded.
-
-Current behavior:
-- queued runs can be cancelled before execution
-- waiting runs can be cancelled immediately
-- running runs mark `cancel_requested` and stop at the next safe boundary
-- cancellation emits `run.cancel_requested` and `run.cancelled` traces
-- no subprocess force-kill logic is introduced in this slice
-
-## Live progress streaming
-`GET /runs/{id}/stream` emits compact SSE envelopes of two kinds:
-- `trace`: ordered trace event records
-- `run`: current serialized run state when status changes
-
-The run detail page uses this stream to keep queued/running/waiting/completed/failed/cancelled views current without polling-heavy UI code.
+There is no three-way merge or git merge behavior in this milestone.
 
 ## Trace model
-Important async lifecycle events now include:
+Important review-first lifecycle events now include:
 - `run.queued`
 - `run.started`
 - `run.paused`
 - `run.resumed`
-- `run.cancel_requested`
-- `run.cancelled`
-- `planning.started`
-- `planning.completed`
-- `planning.fallback`
 - `approval.requested`
 - `approval.resolved`
-- `tool.started`
-- `tool.completed`
-- `tool.failed`
-- `synthesis.started`
-- `synthesis.completed`
+- `change.proposed`
+- `change.review_pending`
+- `change.apply_requested`
+- `change.applied`
+- `change.apply_failed`
+- `change.rejected`
 - `run.completed`
 - `run.failed`
 
-Trace payloads remain compact and do not store hidden reasoning, secrets, or large provider dumps.
+Trace payloads remain compact and do not store hidden reasoning, secrets, or full file bodies.
 
 ## Current limitations
 - The worker is still single-process and local to the API app.
 - Cancellation is boundary-based, not forceful termination of running subprocess trees.
-- Restart handling re-queues queued/running runs, but does not attempt distributed locking or exactly-once execution semantics.
-- Approval routing is step-boundary based; there is no broader policy engine in this milestone.
+- Review-first mutation capture depends on cooperative mutation-capable local skills returning normalized proposed file changes.
+- Apply is all-or-fail and text-only; there is no partial apply, merge, or remote VCS integration in this slice.
 - The committed web lint config is present, but lint validation still depends on local npm dependency availability.

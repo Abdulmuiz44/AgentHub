@@ -22,17 +22,17 @@
 - Avoid speculative abstractions and advanced product surface.
 
 ## Runtime slice (current alpha)
-- Runs persist through SQLite-backed sessions, runs, traces, approvals, providers, skill definitions, and per-skill config state.
+- Runs persist through SQLite-backed sessions, runs, traces, approvals, providers, skill definitions, per-skill config state, and review-first change-set artifacts.
 - `POST /runs` queues work for the local in-process worker instead of executing the whole run inline.
-- The worker lifecycle is bounded and local: queued -> running -> waiting_for_approval -> completed/failed/cancelled.
+- The worker lifecycle is bounded and local: queued -> running -> waiting_for_approval -> waiting_for_review -> completed/failed/cancelled.
 - Deterministic and model-assisted planning are both preserved under the worker path.
 - Approval-gated steps pause the run, persist a checkpoint, and resume from stored state when approval is resolved.
+- Review-first mutation runs capture proposed text changes, store compact diff previews, and require explicit apply or reject actions before touching disk.
+- Apply safety checks enforce workspace-root confinement, UTF-8 text-only writes, and stale-base detection.
 - Cancellation is cooperative and processed safely for queued, running, and waiting runs.
 - Run detail uses SSE to surface live progress without exposing hidden reasoning or secrets.
 - Skill routing remains bounded: deterministic heuristics plus explicit `Use skill <name>` routing, with optional bounded model-assisted planning.
-- Skill manifests can declare typed config requirements and planner-facing `capability_categories`.
 - Non-secret config values persist in SQLite; secret-like fields persist environment variable names only.
-- Runtime resolves secret bindings from process environment at test/execution time and fails safely when bindings or env values are missing.
 - MCP support remains bounded to local stdio tool wrapping with safe env injection.
 
 ## Search configuration

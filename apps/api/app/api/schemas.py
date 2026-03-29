@@ -22,6 +22,7 @@ class RunCreateRequest(BaseModel):
     enabled_skills: list[str] = Field(default_factory=list)
     execute_now: bool = False
     execution_mode: Literal["deterministic", "model_assisted"] = "deterministic"
+    mutation_apply_mode: Literal["direct_apply", "review_first"] = "direct_apply"
 
 
 class ApprovalResponse(BaseModel):
@@ -43,6 +44,33 @@ class TraceResponse(BaseModel):
     created_at: datetime
 
 
+class ChangeFileResponse(BaseModel):
+    id: int
+    path: str
+    operation: str
+    before_checksum: str | None = None
+    after_checksum: str | None = None
+    before_preview: str | None = None
+    after_preview: str | None = None
+    diff_preview: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChangeSetResponse(BaseModel):
+    id: int
+    run_id: int
+    status: str
+    change_count: int
+    summary: str
+    apply_summary: str | None = None
+    reject_summary: str | None = None
+    failure_summary: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    files: list[ChangeFileResponse] = Field(default_factory=list)
+
+
 class RunResponse(BaseModel):
     id: int
     session_id: int
@@ -50,11 +78,16 @@ class RunResponse(BaseModel):
     provider: str
     model: str
     execution_mode: str
+    mutation_apply_mode: str
     planning_source: str
     planning_summary: str
     fallback_reason: str | None = None
     status: str
     cancel_requested: bool = False
+    pending_change_count: int = 0
+    review_status: str = "none"
+    apply_summary: str | None = None
+    reject_summary: str | None = None
     final_output: str | None = None
     synthesis_mode: str | None = None
     synthesis_status: str | None = None
@@ -76,6 +109,11 @@ class RunCreateResponse(BaseModel):
 class ApprovalResolveResponse(BaseModel):
     run: RunResponse
     approval: ApprovalResponse
+
+
+class RunChangeActionResponse(BaseModel):
+    run: RunResponse
+    change_set: ChangeSetResponse
 
 
 class RunExecutionSummary(BaseModel):

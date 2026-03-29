@@ -14,6 +14,7 @@ export default function DashboardPage() {
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
   const [executionMode, setExecutionMode] = useState<"deterministic" | "model_assisted">("deterministic");
+  const [mutationApplyMode, setMutationApplyMode] = useState<"direct_apply" | "review_first">("direct_apply");
   const [providerHealth, setProviderHealth] = useState<string | null>(null);
   const [isLoadingProviders, setIsLoadingProviders] = useState(true);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -87,6 +88,7 @@ export default function DashboardPage() {
         model,
         enabled_skills: enabledSkills,
         execution_mode: executionMode,
+        mutation_apply_mode: mutationApplyMode,
       });
       setRunResult(result);
       setMessage(`Run #${result.run.id} queued with status ${result.run.status}.`);
@@ -101,10 +103,13 @@ export default function DashboardPage() {
 
   const providerOptions = useMemo(
     () => providers.map((item) => ({ value: item.provider.name, label: `${item.provider.display_name} (${item.is_configured ? "configured" : "unconfigured"})` })),
-    [providers]
+    [providers],
   );
-
   const selectedProvider = useMemo(() => providers.find((item) => item.provider.name === provider) ?? null, [providers, provider]);
+  const mutationModeSummary =
+    mutationApplyMode === "review_first"
+      ? "Review-first keeps text file mutations off disk during execution. If a skill proposes changes, the run will stop in a review-needed state so you can inspect and apply or reject them."
+      : "Direct apply preserves current behavior. Approved mutation-capable steps can write to the workspace immediately during execution.";
 
   return (
     <main className="mx-auto max-w-2xl p-6">
@@ -117,12 +122,22 @@ export default function DashboardPage() {
       <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-slate-800 p-4">
         <div>
           <label className="mb-1 block text-sm">Task input</label>
-          <textarea className="w-full rounded bg-slate-900 p-2" value={task} onChange={(e) => setTask(e.target.value)} placeholder="Describe the task or say Use skill <name> to ..." required />
+          <textarea
+            className="w-full rounded bg-slate-900 p-2"
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
+            placeholder="Describe the task or say Use skill <name> to ..."
+            required
+          />
         </div>
 
         <div>
           <label className="mb-1 block text-sm">Execution mode</label>
-          <select className="w-full rounded bg-slate-900 p-2" value={executionMode} onChange={(e) => setExecutionMode(e.target.value as "deterministic" | "model_assisted")}>
+          <select
+            className="w-full rounded bg-slate-900 p-2"
+            value={executionMode}
+            onChange={(e) => setExecutionMode(e.target.value as "deterministic" | "model_assisted")}
+          >
             <option value="deterministic">deterministic</option>
             <option value="model_assisted">model_assisted</option>
           </select>
@@ -130,10 +145,28 @@ export default function DashboardPage() {
         </div>
 
         <div>
+          <label className="mb-1 block text-sm">Mutation apply mode</label>
+          <select
+            className="w-full rounded bg-slate-900 p-2"
+            value={mutationApplyMode}
+            onChange={(e) => setMutationApplyMode(e.target.value as "direct_apply" | "review_first")}
+          >
+            <option value="direct_apply">direct_apply</option>
+            <option value="review_first">review_first</option>
+          </select>
+          <div className="mt-2 rounded border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-300">
+            <p className="font-medium text-slate-100">Mutation handling</p>
+            <p className="mt-1">{mutationModeSummary}</p>
+          </div>
+        </div>
+
+        <div>
           <label className="mb-1 block text-sm">Provider selector</label>
           <select className="w-full rounded bg-slate-900 p-2" value={provider} onChange={(e) => setProvider(e.target.value)} disabled={isLoadingProviders || providers.length === 0}>
             {providerOptions.map((item) => (
-              <option key={item.value} value={item.value}>{item.label}</option>
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
             ))}
           </select>
           {selectedProvider ? <p className="mt-1 text-xs text-slate-400">Configuration: {selectedProvider.configuration_status} ({selectedProvider.is_configured ? "configured" : "not configured"})</p> : null}
@@ -144,7 +177,9 @@ export default function DashboardPage() {
           <label className="mb-1 block text-sm">Model selector</label>
           <select className="w-full rounded bg-slate-900 p-2" value={model} onChange={(e) => setModel(e.target.value)} disabled={isLoadingModels || models.length === 0}>
             {models.map((item) => (
-              <option key={item} value={item}>{item}</option>
+              <option key={item} value={item}>
+                {item}
+              </option>
             ))}
           </select>
         </div>
@@ -165,9 +200,13 @@ export default function DashboardPage() {
           <p className="text-sm">Run ID: {runResult.run.id}</p>
           <p className="text-sm">Status: {runResult.run.status}</p>
           <p className="text-sm">Execution mode: {runResult.run.execution_mode}</p>
+          <p className="text-sm">Mutation apply mode: {runResult.run.mutation_apply_mode}</p>
           <p className="text-sm">Planning source: {runResult.run.planning_source}</p>
+          <p className="text-sm text-slate-300">{mutationApplyMode === "review_first" ? "If changes are proposed, the run will pause for review before files are written." : "Mutation-capable steps can apply changes directly after approval."}</p>
           <p className="text-sm">
-            <Link href={`/runs/${runResult.run.id}`} className="text-blue-400 underline hover:text-blue-300">Open live run details</Link>
+            <Link href={`/runs/${runResult.run.id}`} className="text-blue-400 underline hover:text-blue-300">
+              Open live run details
+            </Link>
           </p>
         </section>
       ) : null}

@@ -14,4 +14,5 @@ Ship a minimal local-first platform foundation with one bounded runtime, one ski
 8. Completed: persisted per-skill configuration, env-var-name secret bindings, readiness checks, config-aware MCP env injection, and redacted skill config/test UX.
 9. Completed: optional model-assisted planning with enabled/ready skill discovery, capability metadata, bounded budgets, planning validation, deterministic fallback, and planning-aware run/UI traces.
 10. Completed: async local run orchestration with queued/running/waiting/cancelled lifecycle, approval pause/resume checkpoints, cooperative cancellation, SSE progress streaming, and preserved deterministic/model-assisted planning paths.
-11. Next: improve restart resilience and timestamp hygiene by making step replay semantics more explicitly idempotent and replacing remaining `datetime.utcnow()` usage with timezone-aware UTC timestamps.
+11. Completed: review-first mutation workflows with typed mutation apply modes, persisted change-set artifacts, diff previews, workspace-safe apply/reject flows, new review traces, and dashboard/run-detail review UX.
+12. Next: improve restart resilience and timestamp hygiene by making step replay semantics more explicitly idempotent and replacing remaining `datetime.utcnow()` usage with timezone-aware UTC timestamps.

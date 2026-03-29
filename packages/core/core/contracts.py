@@ -10,6 +10,7 @@ class RunStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     WAITING_FOR_APPROVAL = "waiting_for_approval"
+    WAITING_FOR_REVIEW = "waiting_for_review"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -24,6 +25,18 @@ class ApprovalStatus(str, Enum):
 class ExecutionMode(str, Enum):
     DETERMINISTIC = "deterministic"
     MODEL_ASSISTED = "model_assisted"
+
+
+class MutationApplyMode(str, Enum):
+    DIRECT_APPLY = "direct_apply"
+    REVIEW_FIRST = "review_first"
+
+
+class ReviewStatus(str, Enum):
+    NONE = "none"
+    PENDING = "pending"
+    APPLIED = "applied"
+    REJECTED = "rejected"
 
 
 class PlanningSource(str, Enum):
@@ -50,6 +63,12 @@ class EventType(str, Enum):
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"
     TOOL_FAILED = "tool.failed"
+    CHANGE_PROPOSED = "change.proposed"
+    CHANGE_REVIEW_PENDING = "change.review_pending"
+    CHANGE_APPLY_REQUESTED = "change.apply_requested"
+    CHANGE_APPLIED = "change.applied"
+    CHANGE_APPLY_FAILED = "change.apply_failed"
+    CHANGE_REJECTED = "change.rejected"
     SYNTHESIS_STARTED = "synthesis.started"
     SYNTHESIS_COMPLETED = "synthesis.completed"
     SYNTHESIS_FAILED = "synthesis.failed"
@@ -86,12 +105,14 @@ class AgentRequest(BaseModel):
     available_skills: list[str] = Field(default_factory=list)
     planning_skills: list[PlanningSkillDescriptor] = Field(default_factory=list)
     execution_mode: ExecutionMode = ExecutionMode.DETERMINISTIC
+    mutation_apply_mode: MutationApplyMode = MutationApplyMode.DIRECT_APPLY
     budget: ExecutionBudget = Field(default_factory=ExecutionBudget)
 
 
 class RunContext(BaseModel):
     run_id: int
     session_id: int | None = None
+    workspace_root: str | None = None
     requested_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -150,6 +171,9 @@ class ExecutionState(BaseModel):
     fallback_reason: str | None = None
     budget_usage_summary: dict[str, Any] = Field(default_factory=dict)
     pending_approval_id: int | None = None
+    pending_change_set_id: int | None = None
+    pending_change_count: int = 0
+    review_status: ReviewStatus = ReviewStatus.NONE
     failure_context: str | None = None
     cancel_requested: bool = False
 

@@ -5,10 +5,19 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session as SQLSession, Session as DBSession
 
-from app.api.schemas import ApprovalResolveResponse, RunCreateRequest, RunCreateResponse, RunResponse, TraceResponse
+from app.api.schemas import (
+    ApprovalResolveResponse,
+    ChangeSetResponse,
+    RunChangeActionResponse,
+    RunCreateRequest,
+    RunCreateResponse,
+    RunResponse,
+    TraceResponse,
+)
 from app.db.session import engine, get_session
-from app.services.runs import cancel_run, create_run, get_run, get_run_response, list_trace, resolve_approval
-from core.contracts import AgentRequest, ApprovalStatus, ExecutionMode, RunStatus
+from app.services.change_review import ChangeReviewError
+from app.services.runs import apply_run_changes, cancel_run, create_run, get_run, get_run_response, list_changes, list_trace, reject_run_changes, resolve_approval
+from core.contracts import AgentRequest, ApprovalStatus, ExecutionMode, MutationApplyMode, RunStatus
 
 router = APIRouter(tags=["runs"])
 
@@ -26,14 +35,12 @@ def create_run_route(payload: RunCreateRequest, request: Request, db: DBSession 
         model=payload.model,
         enabled_skills=payload.enabled_skills,
         execution_mode=ExecutionMode(payload.execution_mode),
+        mutation_apply_mode=MutationApplyMode(payload.mutation_apply_mode),
     )
     run, _session, events = create_run(db, agent_request)
     _worker(request).enqueue(run.id)
     run_payload = get_run_response(db, run.id)
-    return {
-        "run": run_payload,
-        "trace_events": events,
-    }
+    return {"run": run_payload, "trace_events": events}
 
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
@@ -50,6 +57,38 @@ def get_trace_route(run_id: int, db: DBSession = Depends(get_session)):
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return list_trace(db, run_id)
+
+
+@router.get("/runs/{run_id}/changes", response_model=list[ChangeSetResponse])
+def get_changes_route(run_id: int, db: DBSession = Depends(get_session)):
+    changes = list_changes(db, run_id)
+    if changes is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return changes
+
+
+@router.post("/runs/{run_id}/apply", response_model=RunChangeActionResponse)
+def apply_changes_route(run_id: int, db: DBSession = Depends(get_session)):
+    try:
+        result = apply_run_changes(db, run_id)
+    except ChangeReviewError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_payload, change_payload = result
+    return {"run": run_payload, "change_set": change_payload}
+
+
+@router.post("/runs/{run_id}/reject", response_model=RunChangeActionResponse)
+def reject_changes_route(run_id: int, db: DBSession = Depends(get_session)):
+    try:
+        result = reject_run_changes(db, run_id)
+    except ChangeReviewError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_payload, change_payload = result
+    return {"run": run_payload, "change_set": change_payload}
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunResponse)
@@ -107,9 +146,8 @@ async def run_stream(run_id: int, request: Request):
             if current_run["status"] != last_status:
                 last_status = current_run["status"]
                 yield f"data: {json.dumps({'type': 'run', 'data': current_run}, default=str)}\n\n"
-            if current_run["status"] in {RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
+            if current_run["status"] in {RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value, RunStatus.WAITING_FOR_REVIEW.value}:
                 break
             await asyncio.sleep(0.5)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-

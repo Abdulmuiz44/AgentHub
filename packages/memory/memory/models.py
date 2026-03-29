@@ -19,11 +19,16 @@ class Run(SQLModel, table=True):
     provider: str
     model: str
     execution_mode: str = "deterministic"
+    mutation_apply_mode: str = "direct_apply"
     planning_source: str = "deterministic"
     planning_summary: str = ""
     fallback_reason: str | None = None
     status: str = "pending"
     cancel_requested: bool = False
+    pending_change_count: int = 0
+    review_status: str = "none"
+    apply_summary: str | None = None
+    reject_summary: str | None = None
     final_output: str | None = None
     synthesis_mode: str | None = None
     synthesis_status: str | None = None
@@ -52,6 +57,36 @@ class ApprovalRequest(SQLModel, table=True):
     reason: str
     status: str = "pending"
     resolution_summary: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChangeSet(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="run.id")
+    status: str = "pending"
+    change_count: int = 0
+    summary: str = ""
+    apply_summary: str | None = None
+    reject_summary: str | None = None
+    failure_summary: str | None = None
+    applied_at: datetime | None = None
+    rejected_at: datetime | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChangeFile(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    change_set_id: int = Field(foreign_key="changeset.id")
+    path: str
+    operation: str
+    before_checksum: str | None = None
+    after_checksum: str | None = None
+    before_preview: str | None = None
+    after_preview: str | None = None
+    diff_preview: str = ""
+    proposed_content: str = ""
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

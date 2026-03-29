@@ -16,6 +16,7 @@ def create_run(
     session_id: int,
     *,
     execution_mode: str = "deterministic",
+    mutation_apply_mode: str = "direct_apply",
     planning_source: str = "deterministic",
     planning_summary: str = "",
     fallback_reason: str | None = None,
@@ -29,6 +30,7 @@ def create_run(
         model=model,
         session_id=session_id,
         execution_mode=execution_mode,
+        mutation_apply_mode=mutation_apply_mode,
         planning_source=planning_source,
         planning_summary=planning_summary,
         fallback_reason=fallback_reason,
@@ -48,6 +50,11 @@ def update_run(
     *,
     status: str | None = None,
     cancel_requested: bool | None = None,
+    mutation_apply_mode: str | object = _UNSET,
+    pending_change_count: int | object = _UNSET,
+    review_status: str | object = _UNSET,
+    apply_summary: str | None | object = _UNSET,
+    reject_summary: str | None | object = _UNSET,
     final_output: str | None | object = _UNSET,
     synthesis_mode: str | None | object = _UNSET,
     synthesis_status: str | None | object = _UNSET,
@@ -65,6 +72,16 @@ def update_run(
         run.status = status
     if cancel_requested is not None:
         run.cancel_requested = cancel_requested
+    if mutation_apply_mode is not _UNSET:
+        run.mutation_apply_mode = mutation_apply_mode
+    if pending_change_count is not _UNSET:
+        run.pending_change_count = pending_change_count
+    if review_status is not _UNSET:
+        run.review_status = review_status
+    if apply_summary is not _UNSET:
+        run.apply_summary = apply_summary
+    if reject_summary is not _UNSET:
+        run.reject_summary = reject_summary
     if final_output is not _UNSET:
         run.final_output = final_output
     if synthesis_mode is not _UNSET:

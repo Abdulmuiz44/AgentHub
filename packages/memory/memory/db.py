@@ -7,6 +7,7 @@ from sqlmodel import SQLModel, Session, create_engine
 
 RUN_COLUMN_MIGRATIONS = {
     "execution_mode": "TEXT DEFAULT 'deterministic'",
+    "mutation_apply_mode": "TEXT DEFAULT 'direct_apply'",
     "planning_source": "TEXT DEFAULT 'deterministic'",
     "planning_summary": "TEXT DEFAULT ''",
     "fallback_reason": "TEXT",
@@ -18,6 +19,10 @@ RUN_COLUMN_MIGRATIONS = {
     "budget_config": "JSON DEFAULT '{}'",
     "budget_usage_summary": "JSON DEFAULT '{}'",
     "cancel_requested": "BOOLEAN DEFAULT 0",
+    "pending_change_count": "INTEGER DEFAULT 0",
+    "review_status": "TEXT DEFAULT 'none'",
+    "apply_summary": "TEXT",
+    "reject_summary": "TEXT",
     "execution_state": "JSON DEFAULT '{}'",
 }
 

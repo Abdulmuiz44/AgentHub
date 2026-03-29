@@ -485,3 +485,188 @@ def test_model_assisted_run_works_under_worker(monkeypatch) -> None:
 
 
 
+
+
+def _mutation_manifest(script_path: Path, name: str) -> SkillManifest:
+    return SkillManifest(
+        name=name,
+        version="0.1.0",
+        description="Mutation MCP test skill",
+        runtime_type=SkillRuntimeType.MCP_STDIO,
+        scopes=["local:test"],
+        tags=["mcp", "mutation"],
+        capability_categories=["custom_tool"],
+        capabilities=[{"operation": "mutate", "read_only": False}],
+        mcp_stdio=MCPStdioConfig(
+            command=sys.executable,
+            args=[str(script_path)],
+            tool_name="mutate",
+            test_input={"prompt": "write file .tmp/review-first/test.txt with content hello"},
+        ),
+    )
+
+
+def test_review_first_run_proposes_changes_and_apply_flow() -> None:
+    script_path = Path(__file__).parent / "fixtures" / "mcp_mutation_server.py"
+    manifest = _mutation_manifest(script_path, "review_first_mutation_skill")
+    target_path = Path(".tmp/review-first/proposed.txt")
+    if target_path.exists():
+        target_path.unlink()
+
+    with TestClient(app) as client:
+        assert client.post("/skills/install", json={"manifest": manifest.model_dump(mode="json")}).status_code == 200
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Use skill review_first_mutation_skill to write file .tmp/review-first/proposed.txt with content pending-review",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["review_first_mutation_skill"],
+                "mutation_apply_mode": "review_first",
+            },
+        )
+        run_id = created.json()["run"]["id"]
+        waiting = wait_for_status(client, run_id, {"waiting_for_approval"})
+        assert waiting["pending_approval"] is not None
+        assert client.post(f"/runs/{run_id}/approvals/{waiting['pending_approval']['id']}/approve").status_code == 200
+        review = wait_for_status(client, run_id, {"waiting_for_review"})
+        assert review["pending_change_count"] == 1
+        assert not target_path.exists()
+
+        changes = client.get(f"/runs/{run_id}/changes")
+        assert changes.status_code == 200
+        payload = changes.json()
+        assert payload[0]["status"] == "pending"
+        assert payload[0]["files"][0]["path"] == ".tmp/review-first/proposed.txt"
+        assert "+++ b/.tmp/review-first/proposed.txt" in payload[0]["files"][0]["diff_preview"]
+
+        applied = client.post(f"/runs/{run_id}/apply")
+        assert applied.status_code == 200
+        assert applied.json()["run"]["status"] == "completed"
+        assert target_path.read_text(encoding="utf-8") == "pending-review"
+        trace = client.get(f"/runs/{run_id}/trace").json()
+        event_types = [item["event_type"] for item in trace]
+        assert "change.proposed" in event_types
+        assert "change.review_pending" in event_types
+        assert "change.apply_requested" in event_types
+        assert "change.applied" in event_types
+
+
+def test_reject_review_first_changes_preserves_workspace() -> None:
+    script_path = Path(__file__).parent / "fixtures" / "mcp_mutation_server.py"
+    manifest = _mutation_manifest(script_path, "reject_mutation_skill")
+    target_path = Path(".tmp/review-first/rejected.txt")
+    if target_path.exists():
+        target_path.unlink()
+
+    with TestClient(app) as client:
+        assert client.post("/skills/install", json={"manifest": manifest.model_dump(mode="json")}).status_code == 200
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Use skill reject_mutation_skill to write file .tmp/review-first/rejected.txt with content reject-me",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["reject_mutation_skill"],
+                "mutation_apply_mode": "review_first",
+            },
+        )
+        run_id = created.json()["run"]["id"]
+        waiting = wait_for_status(client, run_id, {"waiting_for_approval"})
+        assert client.post(f"/runs/{run_id}/approvals/{waiting['pending_approval']['id']}/approve").status_code == 200
+        wait_for_status(client, run_id, {"waiting_for_review"})
+        rejected = client.post(f"/runs/{run_id}/reject")
+        assert rejected.status_code == 200
+        assert rejected.json()["run"]["review_status"] == "rejected"
+        assert not target_path.exists()
+
+
+def test_direct_apply_mutation_preserves_current_behavior() -> None:
+    script_path = Path(__file__).parent / "fixtures" / "mcp_mutation_server.py"
+    manifest = _mutation_manifest(script_path, "direct_apply_mutation_skill")
+    target_path = Path(".tmp/review-first/direct.txt")
+    if target_path.exists():
+        target_path.unlink()
+
+    with TestClient(app) as client:
+        assert client.post("/skills/install", json={"manifest": manifest.model_dump(mode="json")}).status_code == 200
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Use skill direct_apply_mutation_skill to write file .tmp/review-first/direct.txt with content direct-write",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["direct_apply_mutation_skill"],
+                "mutation_apply_mode": "direct_apply",
+            },
+        )
+        run_id = created.json()["run"]["id"]
+        waiting = wait_for_status(client, run_id, {"waiting_for_approval"})
+        assert client.post(f"/runs/{run_id}/approvals/{waiting['pending_approval']['id']}/approve").status_code == 200
+        final = wait_for_status(client, run_id, {"completed", "failed"})
+        assert final["status"] == "completed"
+        assert target_path.read_text(encoding="utf-8") == "direct-write"
+        changes = client.get(f"/runs/{run_id}/changes")
+        assert changes.status_code == 200
+        assert changes.json() == []
+
+
+def test_apply_blocks_when_workspace_is_stale() -> None:
+    script_path = Path(__file__).parent / "fixtures" / "mcp_mutation_server.py"
+    manifest = _mutation_manifest(script_path, "stale_mutation_skill")
+    target_path = Path(".tmp/review-first/stale.txt")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("base", encoding="utf-8")
+
+    with TestClient(app) as client:
+        assert client.post("/skills/install", json={"manifest": manifest.model_dump(mode="json")}).status_code == 200
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Use skill stale_mutation_skill to write file .tmp/review-first/stale.txt with content new-value",
+                "provider": "builtin",
+                "model": "deterministic",
+                "enabled_skills": ["stale_mutation_skill"],
+                "mutation_apply_mode": "review_first",
+            },
+        )
+        run_id = created.json()["run"]["id"]
+        waiting = wait_for_status(client, run_id, {"waiting_for_approval"})
+        assert client.post(f"/runs/{run_id}/approvals/{waiting['pending_approval']['id']}/approve").status_code == 200
+        wait_for_status(client, run_id, {"waiting_for_review"})
+        target_path.write_text("mutated-outside", encoding="utf-8")
+        blocked = client.post(f"/runs/{run_id}/apply")
+        assert blocked.status_code == 409
+        trace = client.get(f"/runs/{run_id}/trace").json()
+        assert "change.apply_failed" in [item["event_type"] for item in trace]
+
+
+def test_model_assisted_review_first_allows_mutation_skill(monkeypatch) -> None:
+    script_path = Path(__file__).parent / "fixtures" / "mcp_mutation_server.py"
+    manifest = _mutation_manifest(script_path, "model_review_mutation_skill")
+    monkeypatch.setattr(
+        "models.registry.ProviderRegistry.get",
+        lambda _self, name: StubPlanningAdapter(json.dumps({
+            "decision_summary": "propose one file change",
+            "steps": [{"title": "Mutate file", "skill_name": "model_review_mutation_skill", "skill_input": {"prompt": "write file .tmp/review-first/model.txt with content model-review"}, "decision_summary": "Need a mutation step"}],
+        })) if name == "ollama" else None,
+    )
+
+    with TestClient(app) as client:
+        assert client.post("/skills/install", json={"manifest": manifest.model_dump(mode="json")}).status_code == 200
+        created = client.post(
+            "/runs",
+            json={
+                "task": "Use the installed mutation skill",
+                "provider": "ollama",
+                "model": "stub-model",
+                "enabled_skills": ["model_review_mutation_skill"],
+                "execution_mode": "model_assisted",
+                "mutation_apply_mode": "review_first",
+            },
+        )
+        run_id = created.json()["run"]["id"]
+        waiting = wait_for_status(client, run_id, {"waiting_for_approval"})
+        assert client.post(f"/runs/{run_id}/approvals/{waiting['pending_approval']['id']}/approve").status_code == 200
+        review = wait_for_status(client, run_id, {"waiting_for_review"})
+        assert review["mutation_apply_mode"] == "review_first"
